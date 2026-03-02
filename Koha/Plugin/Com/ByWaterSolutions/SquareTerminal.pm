@@ -51,16 +51,13 @@ sub configure {
     unless ( $cgi->param('save') ) {
         my $template = $self->get_template( { file => 'configure.tt' } );
 
-        ## Grab the values we already have for our settings, if any exist
         $template->param(
-            CustomerId      => $self->retrieve_data('CustomerId'),
-            CustomerName    => $self->retrieve_data('CustomerName'),
-            UserName        => $self->retrieve_data('UserName'),
-            Password        => $self->retrieve_data('Password'),
-            ApiKey          => $self->retrieve_data('ApiKey'),
-            ServerIP        => $self->retrieve_data('ServerIP'),
-            ServerAddress   => $self->retrieve_data('ServerAddress'),
-            RegisterMapping => $self->retrieve_data('RegisterMapping'),
+            SquareAccessToken => $self->retrieve_data('SquareAccessToken'),
+            Currency          => $self->retrieve_data('Currency') || 'USD',
+            SquareVersion     => $self->retrieve_data('SquareVersion') || '2025-01-23',
+            RegisterMapping   => $self->retrieve_data('RegisterMapping'),
+            WebhookSignatureKey => $self->retrieve_data('WebhookSignatureKey'),
+            WebhookUrl          => $self->retrieve_data('WebhookUrl'),
         );
 
         $self->output_html( $template->output() );
@@ -68,160 +65,205 @@ sub configure {
     else {
         $self->store_data(
             {
-                CustomerId      => $cgi->param('CustomerId'),
-                CustomerName    => $cgi->param('CustomerName'),
-                UserName        => $cgi->param('UserName'),
-                Password        => $cgi->param('Password'),
-                ApiKey          => $cgi->param('ApiKey'),
-                ServerIP        => $cgi->param('ServerIP'),
-                ServerAddress   => $cgi->param('ServerAddress'),
-                RegisterMapping => $cgi->param('RegisterMapping'),
+                SquareAccessToken   => scalar $cgi->param('SquareAccessToken'),
+                Currency            => scalar $cgi->param('Currency') || 'USD',
+                SquareVersion       => scalar $cgi->param('SquareVersion') || '2025-01-23',
+                RegisterMapping     => scalar $cgi->param('RegisterMapping'),
+                WebhookSignatureKey => scalar $cgi->param('WebhookSignatureKey'),
+                WebhookUrl          => scalar $cgi->param('WebhookUrl'),
             }
         );
         $self->go_home();
     }
 }
 
-## TODO: rename to correct name once js is complete
 sub intranet_js {
-    return q|
+    return <<'JS';
 <script>
 $(document).ready(function() {
-    const squarepayButton = `<input style="margin-left: 5px" type="submit" id="pay-selected-via-square" name="pay_via_square" value="Pay via Square" class="submit"> 
-  <div class="modal fade" id="squarepayModal" role="dialog">
-    <div class="modal-dialog">    
-      <div class="modal-content">
-        <div class="modal-header">
-          <h4 id="squarepay-title" class="modal-title">Square Terminal processing</h4>
-        </div>
-        <div id="squarepay-body" class="modal-body">
-          Payment in progress...
-        </div>
-        <div class="modal-footer">
-          <button id="squarepay-cancel" type="button" class="btn btn-default">Cancel</button>
+
+    // Insert button + modal
+    const squareButtonHtml = `
+      <input style="margin-left: 5px" type="submit"
+             id="pay-selected-via-square"
+             name="pay_via_square"
+             value="Pay via Square"
+             class="submit"
+             disabled="disabled">
+
+      <div class="modal fade" id="squareModal" role="dialog" aria-hidden="true">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h4 class="modal-title">Square Terminal processing</h4>
+            </div>
+            <div id="squareModalBody" class="modal-body">
+              Payment in progress...
+            </div>
+            <div class="modal-footer">
+              <button id="square-cancel" type="button" class="btn btn-default">Cancel</button>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-  </div>`;
-    $(squarepayButton).insertAfter('#writeoff-selected');
+    `;
 
-    $('.cb').on("change", function() {
-        if ($('.cb:checkbox:checked').length > 0) {
-            $('#pay-selected-via-squarepay').removeAttr("disabled");
-        } else {
-            $('#pay-selected-via-squarepay').attr("disabled", "disabled");
-        }
-    });
+    $(squareButtonHtml).insertAfter('#writeoff-selected');
 
-    $("#pay-selected-via-squarepay").on("click", function(e) {
-        e.preventDefault();
-
-        let accountline_ids = [];
+    function selectedAccountlineIds() {
+        let ids = [];
         $(".cb:checked").each(function() {
             const id = $(this).attr("name").split("_")[2];
-            accountline_ids.push(id);
+            if (id) ids.push(id);
         });
+        return ids;
+    }
 
-        const accountlines = encodeURIComponent(accountline_ids.join());
+    function setButtonState() {
+        if ($('.cb:checkbox:checked').length > 0) {
+            $('#pay-selected-via-square').removeAttr("disabled");
+        } else {
+            $('#pay-selected-via-square').attr("disabled", "disabled");
+        }
+    }
 
-        const debit_url = `/api/v1/contrib/squarepay/get_debits/${accountlines}`;
-        $.getJSON(debit_url, function(data) {
-            console.log(data);
+    // Initial state + on checkbox change
+    setButtonState();
+    $('.cb').on("change", setButtonState);
+
+    $("#pay-selected-via-square").on("click", function(e) {
+        e.preventDefault();
+
+        const ids = selectedAccountlineIds();
+        if (!ids.length) return;
+
+        const accountlines = encodeURIComponent(ids.join(","));
+
+        const debitUrl = `/api/v1/contrib/square_terminal/get_debits/${accountlines}`;
+        $.getJSON(debitUrl, function(data) {
             const total = data.total;
             let amount = prompt("Enter amount to collect", total);
-            if (amount != null) {
-                const regex = /^\d*(\.\d{1,2})?\s*$/;
-                if (regex.test(amount)) {
-                    //Start pay station
-                    function getCookie(name) {
-                        let value = `; ${document.cookie}`;
-                        let parts = value.split(`; ${name}=`);
-                        if (parts.length === 2) return parts.pop().split(';').shift();
+            if (amount == null) return;
+
+            const regex = /^\d*(\.\d{1,2})?\s*$/;
+            if (!regex.test(amount)) {
+                alert(`The amount "${amount}" is invalid. Please specify as a currency format ( e.g. 1.00 )`);
+                return;
+            }
+
+            const amountCents = Math.round(parseFloat(amount) * 100);
+
+            const createUrl = `/api/v1/contrib/square_terminal/checkout/${accountlines}?amount=${encodeURIComponent(amountCents)}`;
+
+            $.ajax({
+                url: createUrl,
+                method: 'POST',
+                dataType: 'json',
+                success: function(resp) {
+                    const checkoutId = resp.checkout_id;
+                    if (!checkoutId) {
+                        alert("ERROR: Missing checkout_id from server");
+                        return;
                     }
-                    amount = encodeURIComponent(Math.round(amount * 100)); // Periods asplode things, so we send the amount in cents
-                    const send_transaction_url = `/api/v1/contrib/squarepay/send_transaction/${accountlines}/${amount}`;
-                    console.log("SendTransaction URL: " + send_transaction_url);
-                    $.getJSON(send_transaction_url, function(data) {
-                        console.log(data);
-                        if (data.ret == 0) {
-                            $('#squarepayModal').modal({
-                                backdrop: 'static',
-                                keyboard: false
-                            });
-                            const tracknumber = data.tracknumber;
-                            const query_result_url = `/api/v1/contrib/squarepay/query_result/${tracknumber}`;
-                            let myVar = setInterval(myTimer, 1000);
 
-                            $('#squarepay-cancel').on('click', function() {
-                                clearInterval(myVar);
+                    $('#squareModalBody').text('Payment in progress... Follow prompts on the Square Terminal.');
+                    $('#squareModal').modal({ backdrop: 'static', keyboard: false });
 
-                                const cancel_transaction_url = `/api/v1/contrib/squarepay/end_transaction_cancel/${tracknumber}/${amount}`;
-                                $.getJSON(cancel_transaction_url, function(data) {
-                                    console.log(data);
+                    const statusUrl = `/api/v1/contrib/square_terminal/checkout/status/${encodeURIComponent(checkoutId)}`;
 
-                                    $('#squarepayModal').modal('hide');
+                    let pollTimer = setInterval(function() {
+                        $.getJSON(statusUrl, function(statusResp) {
+                            const checkout = statusResp.checkout || {};
+                            const status = checkout.status || statusResp.status || '';
 
-                                    if (data.ret == 1) {
-                                        alert("ERROR ENDING TRANSACTION: " + data.error);
-                                    }
-                                });
-                            });
+                            // Helpful status messages
+                            if (status) {
+                                $('#squareModalBody').text(`Status: ${status}`);
+                            }
 
+                            if (status === 'CANCELED' || status === 'CANCELLED' || status === 'FAILED') {
+                                clearInterval(pollTimer);
+                                $('#squareModal').modal('hide');
 
-                            function myTimer() {
-                                $.getJSON(query_result_url, function(data) {
-                                    console.log(data);
-                                    if (data.status == "Failed") {
-                                        $('#squarepayModal').modal('hide');
-                                        clearInterval(myVar);
-                                        alert("Transaction Canceled");
-                                    }
-                                    if (data.status == "Canceled") {
-                                        $('#squarepayModal').modal('hide');
-                                        clearInterval(myVar);
-                                        alert("Transaction Canceled");
-                                    }
-                                    if (data.status == "Success") {
-                                        $('#squarepayModal').modal('hide');
-                                        clearInterval(myVar);
-                                        const end_transaction_url = `/api/v1/contrib/squarepay/end_transaction/${tracknumber}/${accountlines}/${amount}`;
-                                        $.getJSON(end_transaction_url, function(data) {
-                                            console.log(data);
-                                            if (data.ret == 1) {
-                                                $('#squarepayModal').modal('hide');
-                                                alert("ERROR ENDING TRANSACTION: " + data.error);
-                                            } else {
-                                                //const get_receipt_url = `/api/v1/contrib/squarepay/get_receipt/${tracknumber}`;
-                                                const get_receipt_url = `/cgi-bin/koha/members/printfeercpt.pl?action=print&accountlines_id=${data.payment_id}`;
-                                                const child = window.open(get_receipt_url, "Receipt", 'width=600,height=600,resizable=yes,toolbar=false,scrollbars=yes,top');
-                                                const timer = setInterval(checkChild, 500);
+                                // best-effort dismiss
+                                const dismissUrl = `/api/v1/contrib/square_terminal/checkout/dismiss/${encodeURIComponent(checkoutId)}`;
+                                $.ajax({ url: dismissUrl, method: 'POST' });
 
-                                                function checkChild() {
-                                                    if (child.closed) {
-                                                        clearInterval(timer);
-                                                        location.reload();
-                                                    }
-                                                }
+                                alert("Transaction canceled or failed.");
+                                return;
+                            }
+
+                            if (status === 'COMPLETED') {
+                                clearInterval(pollTimer);
+
+                                const finalizeUrl = `/api/v1/contrib/square_terminal/checkout/finalize/${encodeURIComponent(checkoutId)}/${accountlines}`;
+
+                                $.ajax({
+                                    url: finalizeUrl,
+                                    method: 'POST',
+                                    dataType: 'json',
+                                    success: function(finalizeResp) {
+                                        $('#squareModal').modal('hide');
+
+                                        // best-effort dismiss after completion
+                                        const dismissUrl = `/api/v1/contrib/square_terminal/checkout/dismiss/${encodeURIComponent(checkoutId)}`;
+                                        $.ajax({ url: dismissUrl, method: 'POST' });
+
+                                        const paymentId = finalizeResp.payment_id;
+                                        if (!paymentId) {
+                                            location.reload();
+                                            return;
+                                        }
+
+                                        const receiptUrl = `/cgi-bin/koha/members/printfeercpt.pl?action=print&accountlines_id=${encodeURIComponent(paymentId)}`;
+                                        const child = window.open(receiptUrl, "Receipt", 'width=600,height=600,resizable=yes,toolbar=false,scrollbars=yes');
+
+                                        const timer = setInterval(function() {
+                                            if (!child || child.closed) {
+                                                clearInterval(timer);
+                                                location.reload();
                                             }
-                                        });
+                                        }, 500);
+                                    },
+                                    error: function(xhr) {
+                                        $('#squareModal').modal('hide');
+                                        alert("ERROR finalizing payment in Koha: " + (xhr.responseText || xhr.statusText));
                                     }
                                 });
                             }
-                        } else {
-                            alert("ERROR: " + data.error);
-                        }
-                    });
-                } else {
-                    alert(`The amount "${amount}" is invalid. Please specify as a currency format ( e.g. 1.00 )`);
-                }
-            }
-        });
+                        });
+                    }, 1000);
 
+                    // Cancel button (unbind first to avoid stacking handlers)
+                    $('#square-cancel').off('click').on('click', function() {
+                        clearInterval(pollTimer);
+
+                        const dismissUrl = `/api/v1/contrib/square_terminal/checkout/dismiss/${encodeURIComponent(checkoutId)}`;
+                        $.ajax({
+                            url: dismissUrl,
+                            method: 'POST',
+                            complete: function() {
+                                $('#squareModal').modal('hide');
+                            }
+                        });
+                    });
+                },
+                error: function(xhr) {
+                    let msg = "ERROR creating Square checkout";
+                    try {
+                        const j = JSON.parse(xhr.responseText);
+                        if (j && (j.description || j.error)) msg = `${j.error || 'ERROR'}: ${j.description || ''}`;
+                    } catch(e) {}
+                    alert(msg);
+                }
+            });
+
+        });
     });
 
 });
 </script>
-|;
+JS
 }
 
 sub install {

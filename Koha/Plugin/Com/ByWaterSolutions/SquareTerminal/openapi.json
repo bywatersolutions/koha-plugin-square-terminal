@@ -1,220 +1,131 @@
 {
-    "/get_debits/{accountlines}": {
-        "get": {
-            "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#get_debits",
-            "operationId": "GetDebits",
-            "tags": [
-                "square_terminal"
-            ],
-            "parameters": [
-                {
-                    "name": "accountlines",
-                    "in": "path",
-                    "description": "List of comma separated accountline id's",
-                    "required": true,
-                    "type": "string"
-                }
-            ],
-            "produces": [
-                "application/json"
-            ],
-            "responses": {
-                "200": {
-                    "description": "JSON data of accountlines"
-                },
-                "404": {
-                    "description": "An error occured",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "error": {
-                                "description": "An explanation for the error",
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
+  "/get_debits/{accountlines}": {
+    "get": {
+      "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#get_debits",
+      "operationId": "GetDebits",
+      "tags": ["square_terminal"],
+      "parameters": [
+        {
+          "name": "accountlines",
+          "in": "path",
+          "description": "List of comma separated accountline ids",
+          "required": true,
+          "type": "string"
         }
-    },
-    "/send_transaction/{accountlines}/{amount}": {
-        "get": {
-            "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#send_transaction",
-            "operationId": "SendTransaction",
-            "tags": [
-                "square_terminal"
-            ],
-            "parameters": [
-                {
-                    "name": "accountlines",
-                    "in": "path",
-                    "description": "List of comma separated accountline id's",
-                    "required": true,
-                    "type": "string"
-                },
-                {
-                    "name": "amount",
-                    "in": "path",
-                    "description": "Amount to pay",
-                    "required": true,
-                    "type": "string"
-                }
-            ],
-            "produces": [
-                "application/json"
-            ],
-            "responses": {
-                "200": {
-                    "description": "JSON data of results"
-                },
-                "404": {
-                    "description": "An error occured",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "error": {
-                                "description": "An explanation for the error",
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    },
-    "/query_result/{tracknumber}": {
-        "get": {
-            "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#query_result",
-            "operationId": "QueryResult",
-            "tags": [
-                "square_terminal"
-            ],
-            "parameters": [
-                {
-                    "name": "tracknumber",
-                    "in": "path",
-                    "description": "Track number returned by send_transaction",
-                    "required": true,
-                    "type": "string"
-                }
-            ],
-            "produces": [
-                "application/json"
-            ],
-            "responses": {
-                "200": {
-                    "description": "JSON data of results"
-                },
-                "404": {
-                    "description": "An error occured",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "error": {
-                                "description": "An explanation for the error",
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    },
-    "/end_transaction/{tracknumber}/{accountlines}/{amount}": {
-        "get": {
-            "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#end_transaction",
-            "operationId": "EndTransaction",
-            "tags": [
-                "square_terminal"
-            ],
-            "parameters": [
-                {
-                    "name": "tracknumber",
-                    "in": "path",
-                    "description": "Track number returned by send_transaction",
-                    "required": true,
-                    "type": "string"
-                },
-                {
-                    "name": "accountlines",
-                    "in": "path",
-                    "description": "List of comma separated accountline id's",
-                    "required": true,
-                    "type": "string"
-                },
-                {
-                    "name": "amount",
-                    "in": "path",
-                    "description": "Amount to pay",
-                    "required": true,
-                    "type": "string"
-                }
-            ],
-            "produces": [
-                "application/json"
-            ],
-            "responses": {
-                "200": {
-                    "description": "JSON data of results"
-                },
-                "404": {
-                    "description": "An error occured",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "error": {
-                                "description": "An explanation for the error",
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    },
-    "/end_transaction_cancel/{tracknumber}/{amount}": {
-        "get": {
-            "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#end_transaction_cancel",
-            "operationId": "EndTransactionCancel",
-            "tags": [
-                "square_terminal"
-            ],
-            "parameters": [
-                {
-                    "name": "tracknumber",
-                    "in": "path",
-                    "description": "Track number returned by send_transaction",
-                    "required": true,
-                    "type": "string"
-                },
-                {
-                    "name": "amount",
-                    "in": "path",
-                    "description": "Amount to pay",
-                    "required": true,
-                    "type": "string"
-                }
-            ],
-            "produces": [
-                "application/json"
-            ],
-            "responses": {
-                "200": {
-                    "description": "JSON data of results"
-                },
-                "404": {
-                    "description": "An error occured",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "error": {
-                                "description": "An explanation for the error",
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        }
+      ],
+      "produces": ["application/json"],
+      "responses": {
+        "200": { "description": "JSON data of accountlines + computed total" },
+        "400": { "description": "Bad request" }
+      }
     }
+  },
+
+  "/checkout/{accountlines}": {
+    "post": {
+      "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#create_checkout",
+      "operationId": "CreateCheckout",
+      "tags": ["square_terminal"],
+      "parameters": [
+        {
+          "name": "accountlines",
+          "in": "path",
+          "description": "List of comma separated accountline ids",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "amount",
+          "in": "query",
+          "description": "Optional integer amount in cents. If omitted, server computes from outstanding balances.",
+          "required": false,
+          "type": "integer"
+        }
+      ],
+      "produces": ["application/json"],
+      "responses": {
+        "200": { "description": "Square checkout created" },
+        "400": { "description": "Bad request" },
+        "404": { "description": "No mapped Square device for this register" },
+        "500": { "description": "Configuration error" }
+      }
+    }
+  },
+
+  "/checkout/status/{checkout_id}": {
+    "get": {
+      "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#get_checkout",
+      "operationId": "GetCheckout",
+      "tags": ["square_terminal"],
+      "parameters": [
+        {
+          "name": "checkout_id",
+          "in": "path",
+          "description": "Square terminal checkout id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "produces": ["application/json"],
+      "responses": {
+        "200": { "description": "Square checkout status response" },
+        "400": { "description": "Bad request" },
+        "500": { "description": "Configuration error" }
+      }
+    }
+  },
+
+  "/checkout/dismiss/{checkout_id}": {
+    "post": {
+      "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#dismiss_checkout",
+      "operationId": "DismissCheckout",
+      "tags": ["square_terminal"],
+      "parameters": [
+        {
+          "name": "checkout_id",
+          "in": "path",
+          "description": "Square terminal checkout id",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "produces": ["application/json"],
+      "responses": {
+        "200": { "description": "Dismiss request accepted" },
+        "400": { "description": "Bad request" },
+        "500": { "description": "Configuration error" }
+      }
+    }
+  },
+
+  "/checkout/finalize/{checkout_id}/{accountlines}": {
+    "post": {
+      "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#finalize_checkout",
+      "operationId": "FinalizeCheckout",
+      "tags": ["square_terminal"],
+      "parameters": [
+        {
+          "name": "checkout_id",
+          "in": "path",
+          "description": "Square terminal checkout id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "accountlines",
+          "in": "path",
+          "description": "List of comma separated accountline ids to pay (server will pay outstanding on these lines)",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "produces": ["application/json"],
+      "responses": {
+        "200": { "description": "Koha payment created and applied to selected lines" },
+        "400": { "description": "Bad request" },
+        "409": { "description": "Checkout not completed yet" },
+        "500": { "description": "Configuration error" }
+      }
+    }
+  }
 }
