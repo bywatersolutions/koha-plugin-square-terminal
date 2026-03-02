@@ -1,0 +1,9 @@
+name: Square Terminal Plugin
+author: Laura Escamilla
+date_authored: 2026-03-02
+date_updated: 2026-03-02
+minimum_version: 25.05.00
+maximum_version:
+version: 1.0
+description: Send card-present payments to Square Terminal hardware and post payments to Koha.
+module: Koha::Plugin::Com::ByWaterSolutions::SquareTerminal

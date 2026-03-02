@@ -1,4 +1,4 @@
-package Koha::Plugin::Com::ByWaterSolutions::CompriseSmartPAY;
+package Koha::Plugin::Com::ByWaterSolutions::SquareTerminal;
 
 use Modern::Perl;
 
@@ -14,19 +14,19 @@ use Mojo::JSON qw(decode_json);
 
 ## Here we set our plugin version
 our $VERSION         = "{VERSION}";
-our $MINIMUM_VERSION = "19.11.06";
+our $MINIMUM_VERSION = "25.05";
 
 ## Here is our metadata, some keys are required, some are optional
 our $metadata = {
-    name            => 'Comprise SmartPAY Plugin',
-    author          => 'Kyle M Hall',
-    date_authored   => '2020-05-13',
-    date_updated    => "1900-01-01",
+    name            => 'Square Terminal Plugin',
+    author          => 'Laura Escamilla',
+    date_authored   => '2026-03-02',
+    date_updated    => "2026-03-02",
     minimum_version => $MINIMUM_VERSION,
     maximum_version => undef,
     version         => $VERSION,
     description =>
-      'This plugin enables sending of phone message to patrons via Twilio.',
+      'Send card-present payments to Square Terminal hardware and post payments to Koha.',
 };
 
 sub new {
@@ -87,33 +87,33 @@ sub intranet_js {
     return q|
 <script>
 $(document).ready(function() {
-    const smartpayButton = `<input style="margin-left: 5px" type="submit" id="pay-selected-via-smartpay" name="pay_via_smartpay" value="Pay via SmartPAY" class="submit"> 
-  <div class="modal fade" id="smartpayModal" role="dialog">
+    const squarepayButton = `<input style="margin-left: 5px" type="submit" id="pay-selected-via-square" name="pay_via_square" value="Pay via Square" class="submit"> 
+  <div class="modal fade" id="squarepayModal" role="dialog">
     <div class="modal-dialog">    
       <div class="modal-content">
         <div class="modal-header">
-          <h4 id="smartpay-title" class="modal-title">Comprise SmartPAY processing</h4>
+          <h4 id="squarepay-title" class="modal-title">Square Terminal processing</h4>
         </div>
-        <div id="smartpay-body" class="modal-body">
+        <div id="squarepay-body" class="modal-body">
           Payment in progress...
         </div>
         <div class="modal-footer">
-          <button id="smartpay-cancel" type="button" class="btn btn-default">Cancel</button>
+          <button id="squarepay-cancel" type="button" class="btn btn-default">Cancel</button>
         </div>
       </div>
     </div>
   </div>`;
-    $(smartpayButton).insertAfter('#writeoff-selected');
+    $(squarepayButton).insertAfter('#writeoff-selected');
 
     $('.cb').on("change", function() {
         if ($('.cb:checkbox:checked').length > 0) {
-            $('#pay-selected-via-smartpay').removeAttr("disabled");
+            $('#pay-selected-via-squarepay').removeAttr("disabled");
         } else {
-            $('#pay-selected-via-smartpay').attr("disabled", "disabled");
+            $('#pay-selected-via-squarepay').attr("disabled", "disabled");
         }
     });
 
-    $("#pay-selected-via-smartpay").on("click", function(e) {
+    $("#pay-selected-via-squarepay").on("click", function(e) {
         e.preventDefault();
 
         let accountline_ids = [];
@@ -124,7 +124,7 @@ $(document).ready(function() {
 
         const accountlines = encodeURIComponent(accountline_ids.join());
 
-        const debit_url = `/api/v1/contrib/smartpay/get_debits/${accountlines}`;
+        const debit_url = `/api/v1/contrib/squarepay/get_debits/${accountlines}`;
         $.getJSON(debit_url, function(data) {
             console.log(data);
             const total = data.total;
@@ -139,27 +139,27 @@ $(document).ready(function() {
                         if (parts.length === 2) return parts.pop().split(';').shift();
                     }
                     amount = encodeURIComponent(Math.round(amount * 100)); // Periods asplode things, so we send the amount in cents
-                    const send_transaction_url = `/api/v1/contrib/smartpay/send_transaction/${accountlines}/${amount}`;
+                    const send_transaction_url = `/api/v1/contrib/squarepay/send_transaction/${accountlines}/${amount}`;
                     console.log("SendTransaction URL: " + send_transaction_url);
                     $.getJSON(send_transaction_url, function(data) {
                         console.log(data);
                         if (data.ret == 0) {
-                            $('#smartpayModal').modal({
+                            $('#squarepayModal').modal({
                                 backdrop: 'static',
                                 keyboard: false
                             });
                             const tracknumber = data.tracknumber;
-                            const query_result_url = `/api/v1/contrib/smartpay/query_result/${tracknumber}`;
+                            const query_result_url = `/api/v1/contrib/squarepay/query_result/${tracknumber}`;
                             let myVar = setInterval(myTimer, 1000);
 
-                            $('#smartpay-cancel').on('click', function() {
+                            $('#squarepay-cancel').on('click', function() {
                                 clearInterval(myVar);
 
-                                const cancel_transaction_url = `/api/v1/contrib/smartpay/end_transaction_cancel/${tracknumber}/${amount}`;
+                                const cancel_transaction_url = `/api/v1/contrib/squarepay/end_transaction_cancel/${tracknumber}/${amount}`;
                                 $.getJSON(cancel_transaction_url, function(data) {
                                     console.log(data);
 
-                                    $('#smartpayModal').modal('hide');
+                                    $('#squarepayModal').modal('hide');
 
                                     if (data.ret == 1) {
                                         alert("ERROR ENDING TRANSACTION: " + data.error);
@@ -172,26 +172,26 @@ $(document).ready(function() {
                                 $.getJSON(query_result_url, function(data) {
                                     console.log(data);
                                     if (data.status == "Failed") {
-                                        $('#smartpayModal').modal('hide');
+                                        $('#squarepayModal').modal('hide');
                                         clearInterval(myVar);
                                         alert("Transaction Canceled");
                                     }
                                     if (data.status == "Canceled") {
-                                        $('#smartpayModal').modal('hide');
+                                        $('#squarepayModal').modal('hide');
                                         clearInterval(myVar);
                                         alert("Transaction Canceled");
                                     }
                                     if (data.status == "Success") {
-                                        $('#smartpayModal').modal('hide');
+                                        $('#squarepayModal').modal('hide');
                                         clearInterval(myVar);
-                                        const end_transaction_url = `/api/v1/contrib/smartpay/end_transaction/${tracknumber}/${accountlines}/${amount}`;
+                                        const end_transaction_url = `/api/v1/contrib/squarepay/end_transaction/${tracknumber}/${accountlines}/${amount}`;
                                         $.getJSON(end_transaction_url, function(data) {
                                             console.log(data);
                                             if (data.ret == 1) {
-                                                $('#smartpayModal').modal('hide');
+                                                $('#squarepayModal').modal('hide');
                                                 alert("ERROR ENDING TRANSACTION: " + data.error);
                                             } else {
-                                                //const get_receipt_url = `/api/v1/contrib/smartpay/get_receipt/${tracknumber}`;
+                                                //const get_receipt_url = `/api/v1/contrib/squarepay/get_receipt/${tracknumber}`;
                                                 const get_receipt_url = `/cgi-bin/koha/members/printfeercpt.pl?action=print&accountlines_id=${data.payment_id}`;
                                                 const child = window.open(get_receipt_url, "Receipt", 'width=600,height=600,resizable=yes,toolbar=false,scrollbars=yes,top');
                                                 const timer = setInterval(checkChild, 500);
@@ -254,7 +254,7 @@ sub api_routes {
 sub api_namespace {
     my ($self) = @_;
 
-    return 'smartpay';
+    return 'square_terminal';
 }
 
 1;

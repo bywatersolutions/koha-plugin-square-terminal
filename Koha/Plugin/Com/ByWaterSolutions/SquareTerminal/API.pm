@@ -1,4 +1,4 @@
-package Koha::Plugin::Com::ByWaterSolutions::CompriseSmartPAY::API;
+package Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API;
 
 # This file is part of Koha.
 #
@@ -32,13 +32,13 @@ use Koha::Account::Lines;
 
 =head2 Class Methods
 
-=head3 Returns TwiML for the given message
+=head3 Square Terminal
 
 =cut
 
 sub get_debits {
     warn
-      "Koha::Plugin::Com::ByWaterSolutions::CompriseSmartPAY::API::get_debits";
+      "Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::get_debits";
     my $c = shift->openapi->valid_input or return;
 
     my $accountline_ids = $c->param('accountlines');
@@ -61,7 +61,7 @@ sub get_debits {
 
 sub send_transaction {
     warn
-"Koha::Plugin::Com::ByWaterSolutions::CompriseSmartPAY::API::send_transaction";
+"Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::send_transaction";
     my $c = shift->openapi->valid_input or return;
 
     my $accountline_ids = $c->param('accountlines');
@@ -73,7 +73,7 @@ sub send_transaction {
     my $accountline = Koha::Account::Lines->find($id);
     my $cardnumber  = $accountline->patron->cardnumber;
 
-    my $self = Koha::Plugin::Com::ByWaterSolutions::CompriseSmartPAY->new( {} );
+    my $self = Koha::Plugin::Com::ByWaterSolutions::SquareTerminal->new( {} );
 
     my $CustomerId      = $self->retrieve_data('CustomerId');
     my $CustomerName    = $self->retrieve_data('CustomerName');
@@ -124,7 +124,7 @@ sub send_transaction {
     my $response = $ua->request($request);
 
     unless ( $response->is_success ) {
-        warn "Comprise SmartPAY response indicates failure: "
+        warn "Square Terminal response indicates failure: "
           . $response->status_line;
     }
 
@@ -138,13 +138,13 @@ sub send_transaction {
 
 sub query_result {
     warn
-"Koha::Plugin::Com::ByWaterSolutions::CompriseSmartPAY::API::query_result";
+"Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::query_result";
     my $c = shift->openapi->valid_input or return;
 
     my $track_number = $c->param('tracknumber');
     warn "Track Number: $track_number";
 
-    my $self = Koha::Plugin::Com::ByWaterSolutions::CompriseSmartPAY->new( {} );
+    my $self = Koha::Plugin::Com::ByWaterSolutions::SquareTerminal->new( {} );
 
     my $CustomerId      = $self->retrieve_data('CustomerId');
     my $UserName        = $self->retrieve_data('UserName');
@@ -188,7 +188,7 @@ sub query_result {
     my $response = $ua->request($request);
 
     unless ( $response->is_success ) {
-        warn "Comprise SmartPAY response indicates failure: "
+        warn "Square Terminal response indicates failure: "
           . $response->status_line;
     }
 
@@ -202,7 +202,7 @@ sub query_result {
 
 sub end_transaction {
     warn
-"Koha::Plugin::Com::ByWaterSolutions::CompriseSmartPAY::API::end_transaction";
+"Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::end_transaction";
     my $c = shift->openapi->valid_input or return;
 
     my $track_number    = $c->param('tracknumber');
@@ -218,7 +218,7 @@ sub end_transaction {
     my @accountlines =
       Koha::Account::Lines->search( { accountlines_id => \@ids } )->as_list;
 
-    my $self = Koha::Plugin::Com::ByWaterSolutions::CompriseSmartPAY->new( {} );
+    my $self = Koha::Plugin::Com::ByWaterSolutions::SquareTerminal->new( {} );
 
     my $CustomerId      = $self->retrieve_data('CustomerId');
     my $UserName        = $self->retrieve_data('UserName');
@@ -264,7 +264,7 @@ sub end_transaction {
     my $response = $ua->request($request);
 
     unless ( $response->is_success ) {
-        warn "Comprise SmartPAY response indicates failure: "
+        warn "Square Terminal response indicates failure: "
           . $response->status_line;
     }
 
@@ -280,7 +280,7 @@ sub end_transaction {
         my $d         = Koha::Account->new({patron_id => $patron_id})->pay({
             amount       => $amount,
             note         => "CC: $data->{digits}, Auth Code: $data->{authcode}",
-            description  => "Payment via Comprise SmartPAY",
+            description  => "Payment via Square Terminal",
             library_id   => C4::Context->userenv->{branch},
             lines        => \@accountlines,
             payment_type => "CREDITCARD",
@@ -294,7 +294,7 @@ sub end_transaction {
 
 sub end_transaction_cancel {
     warn
-"Koha::Plugin::Com::ByWaterSolutions::CompriseSmartPAY::API::end_transaction_cancel";
+"Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::end_transaction_cancel";
     my $c = shift->openapi->valid_input or return;
 
     my $track_number = $c->param('tracknumber');
@@ -304,7 +304,7 @@ sub end_transaction_cancel {
     warn "Track Number: $track_number";
     warn "Amount: $amount";
 
-    my $self = Koha::Plugin::Com::ByWaterSolutions::CompriseSmartPAY->new( {} );
+    my $self = Koha::Plugin::Com::ByWaterSolutions::SquareTerminal->new( {} );
 
     my $CustomerId      = $self->retrieve_data('CustomerId');
     my $UserName        = $self->retrieve_data('UserName');
@@ -350,7 +350,7 @@ sub end_transaction_cancel {
     my $response = $ua->request($request);
 
     unless ( $response->is_success ) {
-        warn "Comprise SmartPAY response indicates failure: "
+        warn "Square Terminal response indicates failure: "
           . $response->status_line;
     }
 
@@ -374,7 +374,4 @@ sub generate_uuid {
     substr $uuid, 6, 1, chr( ord( substr( $uuid, 6, 1 ) ) & 0x0f | 0x40 );
 
     return join '', map { unpack 'H*', $_ }
-      map { substr $uuid, 0, $_, '' } ( 4, 2, 2, 2, 6 );
-}
-
-1;
+      map { substr $uuid, 0, $_, '' } ( 4, 2Square Terminal;

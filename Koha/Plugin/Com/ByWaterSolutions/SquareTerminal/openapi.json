@@ -1,10 +1,10 @@
 {
     "/get_debits/{accountlines}": {
         "get": {
-            "x-mojo-to": "Com::ByWaterSolutions::CompriseSmartPAY::API#get_debits",
+            "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#get_debits",
             "operationId": "GetDebits",
             "tags": [
-                "smartpay"
+                "square_terminal"
             ],
             "parameters": [
                 {
@@ -39,10 +39,10 @@
     },
     "/send_transaction/{accountlines}/{amount}": {
         "get": {
-            "x-mojo-to": "Com::ByWaterSolutions::CompriseSmartPAY::API#send_transaction",
+            "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#send_transaction",
             "operationId": "SendTransaction",
             "tags": [
-                "smartpay"
+                "square_terminal"
             ],
             "parameters": [
                 {
@@ -84,10 +84,10 @@
     },
     "/query_result/{tracknumber}": {
         "get": {
-            "x-mojo-to": "Com::ByWaterSolutions::CompriseSmartPAY::API#query_result",
+            "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#query_result",
             "operationId": "QueryResult",
             "tags": [
-                "smartpay"
+                "square_terminal"
             ],
             "parameters": [
                 {
@@ -122,10 +122,10 @@
     },
     "/end_transaction/{tracknumber}/{accountlines}/{amount}": {
         "get": {
-            "x-mojo-to": "Com::ByWaterSolutions::CompriseSmartPAY::API#end_transaction",
+            "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#end_transaction",
             "operationId": "EndTransaction",
             "tags": [
-                "smartpay"
+                "square_terminal"
             ],
             "parameters": [
                 {
@@ -174,10 +174,10 @@
     },
     "/end_transaction_cancel/{tracknumber}/{amount}": {
         "get": {
-            "x-mojo-to": "Com::ByWaterSolutions::CompriseSmartPAY::API#end_transaction_cancel",
+            "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#end_transaction_cancel",
             "operationId": "EndTransactionCancel",
             "tags": [
-                "smartpay"
+                "square_terminal"
             ],
             "parameters": [
                 {
