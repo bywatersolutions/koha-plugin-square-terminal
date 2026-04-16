@@ -64,6 +64,10 @@ Returns:
 - status (initial)
 =cut
 
+use Data::Dumper;
+
+warn "REGISTER DEBUG: " . Dumper(C4::Context->userenv);
+
 sub create_checkout {
     warn "Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::create_checkout";
     my $c = shift->openapi->valid_input or return;
@@ -106,7 +110,7 @@ sub create_checkout {
         json   => { error => 'CONFIG', description => 'SquareAccessToken not configured' }
     ) unless $token;
 
-    my $device_id = _device_id_for_register( $self, $c );
+    my $device_id = _device_id_for_register($self);
     return $c->render(
         status => 404, format => 'json',
         json   => { error => 'TERM', description => 'No Square device_id mapped for this register' }
@@ -154,6 +158,88 @@ sub create_checkout {
             idempotency_key  => $idempotency_key,
             amount_cents     => 0 + $amount_cents,
             accountlines     => join(',', @ids),
+        }
+    );
+}
+
+sub create_pos_checkout {
+    warn "Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::create_pos_checkout";
+    my $c = shift->openapi->valid_input or return;
+
+    my $amount_cents = $c->param('amount');
+    my $register_id  = $c->param('register_id');
+
+    return $c->render(
+        status => 400,
+        format => 'json',
+        json   => { error => 'BAD_REQUEST', description => 'amount must be integer cents' }
+    ) unless defined $amount_cents && $amount_cents =~ /^\d+$/ && $amount_cents > 0;
+
+    return $c->render(
+        status => 400,
+        format => 'json',
+        json   => { error => 'BAD_REQUEST', description => 'register_id required' }
+    ) unless defined $register_id && $register_id =~ /^\d+$/;
+
+    my $self   = Koha::Plugin::Com::ByWaterSolutions::SquareTerminal->new({});
+    my $token  = $self->retrieve_data('SquareAccessToken') // '';
+    my $cur    = $self->retrieve_data('Currency') // 'USD';
+    my $square_version = $self->retrieve_data('SquareVersion') // '2025-01-23';
+
+    return $c->render(
+        status => 500,
+        format => 'json',
+        json   => { error => 'CONFIG', description => 'SquareAccessToken not configured' }
+    ) unless $token;
+
+    my $device_id = _device_id_for_register( $self, $register_id );
+    return $c->render(
+        status => 404,
+        format => 'json',
+        json   => { error => 'TERM', description => 'No Square device_id mapped for this register' }
+    ) unless $device_id;
+
+    my $idempotency_key = _uuid();
+
+    my $payload = {
+        idempotency_key => $idempotency_key,
+        checkout => {
+            amount_money => {
+                amount   => 0 + $amount_cents,
+                currency => $cur,
+            },
+            device_options => {
+                device_id => $device_id,
+            },
+            note => "Koha POS payment",
+            reference_id => "pos-register-$register_id",
+        }
+    };
+
+    my $res = _square_request(
+        token          => $token,
+        square_version => $square_version,
+        method         => 'POST',
+        path           => '/v2/terminals/checkouts',
+        payload        => $payload,
+    );
+
+    return $c->render(
+        status => $res->{status},
+        format => 'json',
+        json   => $res->{json} // { error => 'SQUARE', description => $res->{error} // 'Unknown error' }
+    ) unless $res->{ok};
+
+    my $checkout = $res->{json}->{checkout};
+    return $c->render(
+        status => 200,
+        format => 'json',
+        json   => {
+            checkout_id     => $checkout->{id},
+            status          => $checkout->{status},
+            idempotency_key => $idempotency_key,
+            amount_cents    => 0 + $amount_cents,
+            register_id     => 0 + $register_id,
         }
     );
 }
@@ -334,7 +420,7 @@ sub finalize_checkout {
 # ---------------------------
 
 sub _device_id_for_register {
-    my ( $plugin, $c ) = @_;
+    my ( $plugin, $register_id ) = @_;
 
     my $yaml = $plugin->retrieve_data('RegisterMapping') // '';
     my $mapping = {};
@@ -345,7 +431,7 @@ sub _device_id_for_register {
         $mapping = {};
     };
 
-    my $register_id = C4::Context->userenv->{register_id};
+    $register_id //= C4::Context->userenv->{register_id};
     return unless $register_id;
 
     return $mapping->{$register_id};
@@ -360,25 +446,26 @@ sub _square_request {
     my $path           = $args{path} || '/';
     my $payload        = $args{payload};
 
-    my $base = 'https://connect.squareup.com';
+    my $base = 'https://connect.squareupsandbox.com';
     my $url  = $base . $path;
-
-    my $headers = HTTP::Headers->new;
-    $headers->header( 'Authorization' => "Bearer $token" );
-    $headers->header( 'Content-Type'  => 'application/json' );
-    $headers->header( 'Accept'        => 'application/json' );
-    $headers->header( 'Square-Version'=> $square_version );
 
     my $ua = LWP::UserAgent->new( timeout => 30 );
 
     my $req;
     if ( $method eq 'POST' ) {
         my $body = encode_json( $payload // {} );
-        $req = POST( $url, Content => $body );
-        $req->header($headers);
+        $req = HTTP::Request->new( 'POST', $url );
+        $req->header( 'Authorization'  => "Bearer $token" );
+        $req->header( 'Content-Type'   => 'application/json' );
+        $req->header( 'Accept'         => 'application/json' );
+        $req->header( 'Square-Version' => $square_version );
+        $req->content($body);
     } else {
-        $req = GET($url);
-        $req->header($headers);
+        $req = HTTP::Request->new( 'GET', $url );
+        $req->header( 'Authorization'  => "Bearer $token" );
+        $req->header( 'Content-Type'   => 'application/json' );
+        $req->header( 'Accept'         => 'application/json' );
+        $req->header( 'Square-Version' => $square_version );
     }
 
     my $resp = $ua->request($req);

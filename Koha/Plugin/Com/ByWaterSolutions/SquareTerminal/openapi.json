@@ -52,6 +52,37 @@
     }
   },
 
+  "/checkout/pos": {
+    "post": {
+      "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#create_pos_checkout",
+      "operationId": "CreatePosCheckout",
+      "tags": ["square_terminal"],
+      "parameters": [
+        {
+          "name": "amount",
+          "in": "query",
+          "description": "Required integer amount in cents for the POS sale total.",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "register_id",
+          "in": "query",
+          "description": "Koha cash register id selected on the POS page.",
+          "required": true,
+          "type": "integer"
+        }
+      ],
+      "produces": ["application/json"],
+      "responses": {
+        "200": { "description": "Square POS checkout created" },
+        "400": { "description": "Bad request" },
+        "404": { "description": "No mapped Square device for this register" },
+        "500": { "description": "Configuration error" }
+      }
+    }
+  },
+
   "/checkout/status/{checkout_id}": {
     "get": {
       "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#get_checkout",
