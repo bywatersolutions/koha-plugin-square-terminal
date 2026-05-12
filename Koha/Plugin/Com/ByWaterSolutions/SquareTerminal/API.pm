@@ -64,10 +64,6 @@ Returns:
 - status (initial)
 =cut
 
-use Data::Dumper;
-
-warn "REGISTER DEBUG: " . Dumper(C4::Context->userenv);
-
 sub create_checkout {
     warn "Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::create_checkout";
     my $c = shift->openapi->valid_input or return;
@@ -129,7 +125,6 @@ sub create_checkout {
                 device_id => $device_id,
             },
             note => "Koha fees payment",
-            # reference_id is handy for debugging in Square dashboard
             reference_id => join( ',', @ids ),
         }
     };
