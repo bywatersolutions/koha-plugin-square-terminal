@@ -1,15 +1,11 @@
 name: CI
-
 on:
   push:
-    branches:
-      - '**'
-    tags:
-      - 'v*.*.*'
   pull_request:
     branches:
       - main
-  workflow_dispatch:
+    tags:
+      - 'v*.*.*'
   schedule:
     - cron: "0 6 * * *"
 
@@ -17,200 +13,157 @@ jobs:
   unit_tests:
     name: Run unit tests
     runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
         koha-version: [main, stable, oldstable]
 
     steps:
-      - name: Checkout plugin code
-        uses: actions/checkout@v4
+    - name: Checkout plugin code
+      uses: actions/checkout@v4
 
-      - name: Get Koha Version Branch Name
-        id: koha-version
-        uses: bywatersolutions/github-action-koha-get-version-by-label@v2
-        with:
-          version-label: "${{ matrix.koha-version }}"
+    - name: Get Koha Version Branch Name
+      id: koha-version
+      uses: "bywatersolutions/github-action-koha-get-version-by-label@v2"
+      with:
+        version-label: "${{ matrix.koha-version }}"
 
-      - name: Set up environment variables
-        run: |
-          IFS='/' read -r -a parts <<< "$GITHUB_REPOSITORY"
-          GITHUB_REPO="${parts[1]}"
+    - name: Set up environment variables
+      run: |
+        IFS='/' read -r -a parts <<< "$GITHUB_REPOSITORY"
+        GITHUB_REPO="${parts[1]}"
+        echo "GITHUB_REPO=$GITHUB_REPO" >> $GITHUB_ENV
+        echo "KOHA_BRANCH=${{ steps.koha-version.outputs.current-branch-name }}" >> $GITHUB_ENV
+        echo "PLUGINS_DIR=$(pwd)/.." >> $GITHUB_ENV
+        echo "SYNC_REPO=$(pwd)/../kohaclone" >> $GITHUB_ENV
 
-          echo "GITHUB_REPO=$GITHUB_REPO" >> "$GITHUB_ENV"
-          echo "KOHA_BRANCH=${{ steps.koha-version.outputs.current-branch-name }}" >> "$GITHUB_ENV"
-          echo "PLUGINS_DIR=$(pwd)/.." >> "$GITHUB_ENV"
-          echo "SYNC_REPO=$(pwd)/../kohaclone" >> "$GITHUB_ENV"
+    - name: Check out Koha
+      run: |
+        cd ..
+        git clone --branch ${{ env.KOHA_BRANCH }} --single-branch --depth 1 https://github.com/Koha-Community/Koha.git kohaclone
 
-      - name: Check out Koha
-        run: |
-          cd ..
+    - name: Install koha-testing-docker
+      run: |
+        cd ..
+        git clone https://gitlab.com/koha-community/koha-testing-docker.git
+        cd koha-testing-docker
+        cp env/defaults.env .env
+        echo "$(pwd)/bin" >> $GITHUB_PATH
 
-          git clone \
-            --branch "${{ env.KOHA_BRANCH }}" \
-            --single-branch \
-            --depth 1 \
-            https://github.com/Koha-Community/Koha.git \
-            kohaclone
+    - name: Launch KTD instance with plugins support
+      run: |
+        cd ../koha-testing-docker
+        export LOCAL_USER_ID=$(id -u)
+        export KTD_HOME=$(pwd)
+        ktd --name square-terminal --plugins up -d
 
-      - name: Install koha-testing-docker
-        run: |
-          cd ..
+    - name: Wait for KTD to be ready
+      run: |
+        cd ../koha-testing-docker
+        export KTD_HOME=$(pwd)
+        ktd --name square-terminal --wait-ready 120
 
-          git clone \
-            https://gitlab.com/koha-community/koha-testing-docker.git
+    - name: Run plugin tests
+      run: |
+        export KTD_HOME=$(pwd)/../koha-testing-docker
+        ktd --name galadriel --shell --run "
+          cd /kohadevbox/plugins/${{ env.GITHUB_REPO }} &&
+          export PERL5LIB=\$PERL5LIB:. &&
+          prove -v -r -s t/
+        "
 
-          cd koha-testing-docker
+    - name: Show logs on failure
+      if: failure()
+      run: |
+        export KTD_HOME=$(pwd)/../koha-testing-docker
+        echo "=== KTD instance status ==="
+        ktd --name square-terminal --list || true
+        echo "=== Koha error logs ==="
+        ktd --name square-terminal --shell --run "tail -50 /var/log/koha/kohadev/plack-intranet-error.log" || true
+        echo "=== Container logs ==="
+        docker logs square-terminal-koha-1 --tail 50 || true
 
-          cp env/defaults.env .env
-          echo "$(pwd)/bin" >> "$GITHUB_PATH"
-
-      - name: Launch KTD instance with plugins support
-        run: |
-          cd ../koha-testing-docker
-
-          export LOCAL_USER_ID="$(id -u)"
-          export KTD_HOME="$(pwd)"
-
-          ktd --name square-terminal --plugins up -d
-
-      - name: Wait for KTD to be ready
-        run: |
-          cd ../koha-testing-docker
-
-          export KTD_HOME="$(pwd)"
-
-          ktd --name square-terminal --wait-ready 120
-
-      - name: Run plugin tests
-        run: |
-          export KTD_HOME="$(pwd)/../koha-testing-docker"
-
-          ktd --name square-terminal --shell --run "
-            cd /kohadevbox/plugins/${{ env.GITHUB_REPO }} &&
-            export PERL5LIB=\$PERL5LIB:. &&
-            prove -v -r -s t/
-          "
-
-      - name: Show logs on failure
-        if: failure()
-        run: |
-          export KTD_HOME="$(pwd)/../koha-testing-docker"
-
-          echo "=== KTD instance status ==="
-          ktd --name square-terminal --list || true
-
-          echo "=== Koha intranet error log ==="
-          ktd --name square-terminal --shell --run \
-            "tail -100 /var/log/koha/kohadev/plack-intranet-error.log" \
-            || true
-
-          echo "=== Koha API error log ==="
-          ktd --name square-terminal --shell --run \
-            "tail -100 /var/log/koha/kohadev/plack-api-error.log" \
-            || true
-
-          echo "=== Container logs ==="
-          docker logs square-terminal-koha-1 --tail 100 || true
-
-      - name: Cleanup KTD instance
-        if: always()
-        run: |
-          export KTD_HOME="$(pwd)/../koha-testing-docker"
-
-          ktd --name square-terminal down || true
+    - name: Cleanup KTD instance
+      if: always()
+      run: |
+        export KTD_HOME=$(pwd)/../koha-testing-docker
+        ktd --name square-terminal down || true
 
   release:
     name: Build & Release
     runs-on: ubuntu-latest
-
     if: startsWith(github.ref, 'refs/tags/v')
     needs: unit_tests
-
     strategy:
       fail-fast: false
-
     steps:
-      - name: Checkout plugin code
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Parse repository and tag information
-        id: myvars
-        run: |
-          IFS='/' read -r -a parts <<< "$GITHUB_REPOSITORY"
-          GITHUB_REPO="${parts[1]}"
+    - name: Parse out and store the GitHub repository name
+      id: myvars
+      run: |
+        IFS='/' read -r -a parts <<< "$GITHUB_REPOSITORY"
+        GITHUB_REPO="${parts[1]}"
+        echo "github_repo=$GITHUB_REPO" >> $GITHUB_OUTPUT
+        echo "GITHUB REPO: $GITHUB_REPO"
 
-          echo "github_repo=$GITHUB_REPO" >> "$GITHUB_OUTPUT"
-          echo "GITHUB REPO: $GITHUB_REPO"
+        TAG_VERSION="${GITHUB_REF##*/}"
+        echo "TAG VERSION: $TAG_VERSION"
+        TAG_VERSION="${TAG_VERSION:1}"
+        echo "TAG VERSION 2: $TAG_VERSION"
+        echo "tag_version=$TAG_VERSION" >> $GITHUB_OUTPUT
 
-          TAG_VERSION="${GITHUB_REF##*/}"
-          echo "TAG VERSION: $TAG_VERSION"
+    - name: Get Koha Version Branch Name
+      id: koha-version-oldstable
+      uses: "bywatersolutions/github-action-koha-get-version-by-label@v2"
+      with:
+        version-label: "oldstable"
 
-          TAG_VERSION="${TAG_VERSION:1}"
-          echo "TAG VERSION WITHOUT V: $TAG_VERSION"
+    - name: Print minimum version
+      run: |
+        echo "Current oldstable version: ${{ steps.koha-version-oldstable.outputs.version-major-minor }}"
 
-          echo "tag_version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+    - name: Dump myvars outputs
+      env:
+        GITHUB_CONTEXT: ${{ toJson(steps.myvars.outputs) }}
+      run: echo "$GITHUB_CONTEXT"
 
-      - name: Get Koha oldstable version
-        id: koha-version-oldstable
-        uses: bywatersolutions/github-action-koha-get-version-by-label@v2
-        with:
-          version-label: oldstable
+    - name: Build Koha Plugin kpz artifact
+      id: kpz
+      uses: "bywatersolutions/github-action-koha-plugin-create-kpz@master"
+      with:
+        release-version: ${{ steps.myvars.outputs.tag_version }}
+        release-name: ${{ steps.myvars.outputs.github_repo }}
+        minimum-version: ${{ steps.koha-version-oldstable.outputs.version-major-minor }}
+        plugin-module: "Koha/Plugin/Com/ByWaterSolutions/SquareTerminal.pm"
 
-      - name: Print minimum version
-        run: |
-          echo "Current oldstable version: ${{ steps.koha-version-oldstable.outputs.version-major-minor }}"
+    - name: See if kpz was created
+      run: |
+        echo "FILENAME: ${{ steps.kpz.outputs.filename }}"
+        ls -alh
 
-      - name: Dump parsed outputs
-        env:
-          GITHUB_CONTEXT: ${{ toJson(steps.myvars.outputs) }}
-        run: |
-          echo "$GITHUB_CONTEXT"
-
-      - name: Build Koha plugin KPZ artifact
-        id: kpz
-        uses: bywatersolutions/github-action-koha-plugin-create-kpz@master
-        with:
-          release-version: ${{ steps.myvars.outputs.tag_version }}
-          release-name: ${{ steps.myvars.outputs.github_repo }}
-          minimum-version: ${{ steps.koha-version-oldstable.outputs.version-major-minor }}
-          plugin-module: Koha/Plugin/Com/ByWaterSolutions/SquareTerminal.pm
-
-      - name: Verify KPZ artifact
-        run: |
-          echo "FILENAME: ${{ steps.kpz.outputs.filename }}"
-          ls -alh
-
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            ${{ steps.kpz.outputs.filename }}
-            CHANGELOG.md
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Release
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: |
+          ${{ steps.kpz.outputs.filename }}
+          CHANGELOG.md
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   keepalive:
     name: Keep Alive
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Check age and push commit if needed
-        run: |
-          LAST_COMMIT="$(git --no-pager log -1 --format=%ct)"
-          NOW="$(date +%s)"
-          DIFF="$((NOW - LAST_COMMIT))"
-          DAYS="$((DIFF / 86400))"
-
-          git config --global user.email "kyle@bywatersolutions.com"
-          git config --global user.name "Kyle M Hall"
-
-          if [ "$DAYS" -gt 50 ]; then
-            git commit --allow-empty -m "Automated commit from keep alive workflow"
-            git push
-          fi
+    - uses: actions/checkout@v4
+    - name: Check age and push commit if needed
+      run: |
+        LAST_COMMIT=$( git --no-pager log -1 --format=%ct )
+        NOW=$(date +%s)
+        DIFF=$(($NOW-$LAST_COMMIT))
+        DAYS=$(($DIFF/86400))
+        git config --global user.email kyle@bywatersolutions.com
+        git config --global user.name "Kyle M Hall"
+        git commit --allow-empty -m "Automated commit from keep alive workflow"
+        if [ "$DAYS" -gt "50" ]; then git push; fi
