@@ -158,5 +158,30 @@
         "500": { "description": "Configuration error" }
       }
     }
+  },
+
+"/webhook": {
+  "post": {
+    "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#webhook",
+    "operationId": "SquareTerminalWebhook",
+    "tags": ["square_terminal"],
+    "consumes": ["application/json"],
+    "produces": ["application/json"],
+    "responses": {
+      "200": {
+        "description": "Square webhook accepted"
+      },
+      "400": {
+        "description": "Invalid webhook payload"
+      },
+      "401": {
+        "description": "Invalid Square webhook signature"
+      },
+      "500": {
+        "description": "Webhook configuration error"
+      }
+    }
   }
+}
+
 }

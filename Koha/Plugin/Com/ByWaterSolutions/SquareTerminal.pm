@@ -21,7 +21,7 @@ our $metadata = {
     name            => 'Square Terminal Plugin',
     author          => 'Laura Escamilla',
     date_authored   => '2026-03-02',
-    date_updated    => "2026-03-02",
+    date_updated    => "2026-07-10",
     minimum_version => $MINIMUM_VERSION,
     maximum_version => undef,
     version         => $VERSION,
@@ -53,6 +53,7 @@ sub configure {
 
         $template->param(
             SquareAccessToken => $self->retrieve_data('SquareAccessToken'),
+            SquareEnvironment => $self->retrieve_data('SquareEnvironment') || 'sandbox',
             Currency          => $self->retrieve_data('Currency') || 'USD',
             SquareVersion     => $self->retrieve_data('SquareVersion') || '2025-01-23',
             RegisterMapping   => $self->retrieve_data('RegisterMapping'),
@@ -63,16 +64,35 @@ sub configure {
         $self->output_html( $template->output() );
     }
     else {
-        $self->store_data(
-            {
-                SquareAccessToken   => scalar $cgi->param('SquareAccessToken'),
+        my $access_token =
+            scalar $cgi->param('SquareAccessToken') // '';
+        
+        my $signature_key =
+            scalar $cgi->param('WebhookSignatureKey') // '';
+
+         # Keep existing secrets when the corresponding fields are left blank.
+        $access_token ||= $self->retrieve_data('SquareAccessToken') // '';
+        $signature_key ||= $self->retrieve_data('WebhookSignatureKey') // '';
+
+        my $environment =
+            scalar $cgi->param('SquareEnvironment') // 'sandbox';
+
+        # Only permit known environment values.
+        $environment = 'sandbox'
+            unless $environment eq 'sandbox'
+                || $environment eq 'production';
+
+        my $data = {
+                SquareAccessToken   => $access_token,
+                SquareEnvironment   => $environment,
                 Currency            => scalar $cgi->param('Currency') || 'USD',
                 SquareVersion       => scalar $cgi->param('SquareVersion') || '2025-01-23',
                 RegisterMapping     => scalar $cgi->param('RegisterMapping'),
-                WebhookSignatureKey => scalar $cgi->param('WebhookSignatureKey'),
+                WebhookSignatureKey => $signature_key,
                 WebhookUrl          => scalar $cgi->param('WebhookUrl'),
-            }
-        );
+        };
+
+        $self->store_data($data);
         $self->go_home();
     }
 }
@@ -143,11 +163,28 @@ $(document).ready(function() {
     }
 
     function parseAmountToCents(amount) {
-        if (amount == null || amount === '') return null;
-        const regex = /^\d*(\.\d{1,2})?\s*$/;
-        if (!regex.test(amount)) return null;
-        return Math.round(parseFloat(amount) * 100);
+    if (amount == null) return null;
+
+    const normalized = String(amount)
+        .trim()
+        .replace(/[$,]/g, '');
+
+    if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {
+        console.log('Invalid Square amount:', {
+            original: amount,
+            normalized: normalized,
+            characters: Array.from(String(amount)).map(char => char.charCodeAt(0))
+        });
+
+        return null;
     }
+
+    const cents = Math.round(Number(normalized) * 100);
+
+    return Number.isSafeInteger(cents) && cents > 0
+        ? cents
+        : null;
+}
 
     function launchSquarePayment(accountlineIds, defaultAmount) {
         if (!accountlineIds || !accountlineIds.length) {
@@ -242,20 +279,28 @@ $(document).ready(function() {
                                         $.ajax({ url: dismissUrl, method: 'POST' });
 
                                         const paymentId = finalizeResp.payment_id;
-                                        if (!paymentId) {
-                                            location.reload();
-                                            return;
+
+                                        $('#pay-via-square-individual, #pay-selected-via-square')
+                                            .prop('disabled', true);
+
+                                        const currentUrl = new URL(window.location.href);
+                                        const borrowernumber = currentUrl.searchParams.get('borrowernumber');
+
+                                        const accountUrl = borrowernumber
+                                            ? `/cgi-bin/koha/members/boraccount.pl?borrowernumber=${encodeURIComponent(borrowernumber)}`
+                                            : window.location.href;
+
+                                        const openReceipt = paymentId && window.confirm(
+                                                "Payment completed successfully.\n\nWould you like to open the receipt?"
+                                            );
+
+                                        if (openReceipt) {
+                                            const receiptUrl =
+                                                `/cgi-bin/koha/members/printfeercpt.pl?action=print&accountlines_id=${encodeURIComponent(paymentId)}`;
+
+                                            window.open(receiptUrl, '_blank');
                                         }
-
-                                        const receiptUrl = `/cgi-bin/koha/members/printfeercpt.pl?action=print&accountlines_id=${encodeURIComponent(paymentId)}`;
-                                        const child = window.open(receiptUrl, "Receipt", 'width=600,height=600,resizable=yes,toolbar=false,scrollbars=yes');
-
-                                        const timer = setInterval(function() {
-                                            if (!child || child.closed) {
-                                                clearInterval(timer);
-                                                location.reload();
-                                            }
-                                        }, 500);
+                                        window.location.href = accountUrl;
                                     },
                                     error: function(xhr) {
                                         bootstrap.Modal.getOrCreateInstance(document.getElementById('squareModal')).hide();
@@ -315,27 +360,31 @@ $(document).ready(function() {
     });
     }
 
-        function launchSquarePosPayment(defaultAmount, registerId) {
-        if (!defaultAmount || defaultAmount === '0.00') {
-            alert("No POS total found.");
-            return;
-        }
+function launchSquarePosPayment(defaultAmount, registerId) {
+    if (!defaultAmount || defaultAmount === '0.00') {
+        alert("No POS total found.");
+        return;
+    }
 
-        if (!registerId) {
-            alert("Please select a cash register.");
-            return;
-        }
+    if (!registerId) {
+        alert("Please select a cash register.");
+        return;
+    }
 
-        let amount = prompt("Enter amount to collect", defaultAmount);
-        if (amount == null) return;
+    const amountCents = parseAmountToCents(defaultAmount);
 
-        const amountCents = parseAmountToCents(amount);
-        if (amountCents == null) {
-            alert(`The amount "${amount}" is invalid. Please specify as a currency format (e.g. 1.00)`);
-            return;
-        }
+    if (amountCents == null) {
+        alert(
+            `The amount "${defaultAmount}" is invalid. ` +
+            'Please specify it as a currency format, such as 1.00.'
+        );
+        return;
+    }
 
-        const createUrl = `/api/v1/contrib/square_terminal/checkout/pos?amount=${encodeURIComponent(amountCents)}&register_id=${encodeURIComponent(registerId)}`;
+    const createUrl =
+        `/api/v1/contrib/square_terminal/checkout/pos` +
+        `?amount=${encodeURIComponent(amountCents)}` +
+        `&register_id=${encodeURIComponent(registerId)}`;
 
         $.ajax({
             url: createUrl,

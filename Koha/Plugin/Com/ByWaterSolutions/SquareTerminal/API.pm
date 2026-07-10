@@ -3,10 +3,12 @@ package Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API;
 use Modern::Perl;
 use Mojo::Base 'Mojolicious::Controller';
 
+use Digest::SHA qw( hmac_sha256 );
+use MIME::Base64 qw( encode_base64 );
 use HTTP::Headers;
 use HTTP::Request::Common qw( GET POST );
 use LWP::UserAgent;
-use Mojo::JSON qw( encode_json decode_json );
+use Mojo::JSON qw( encode_json decode_json true );
 use Try::Tiny;
 use YAML qw( Load );
 
@@ -91,6 +93,21 @@ sub create_checkout {
         $amount_cents = int( sprintf( "%.0f", $total * 100 ) );
     }
 
+    my $outstanding_total = 0;
+        $outstanding_total += $_->amountoutstanding for @accountlines;
+
+    my $outstanding_cents =
+        int( sprintf( '%.0f', $outstanding_total * 100 ) );
+
+    return $c->render(
+        status => 400,
+        format => 'json',
+        json   => {
+            error       => 'AMOUNT_EXCEEDS_BALANCE',
+            description => 'Payment amount exceeds the selected outstanding balance',
+      }   
+    ) if $amount_cents > $outstanding_cents;
+
     return $c->render(
         status => 400, format => 'json',
         json   => { error => 'BAD_REQUEST', description => 'Amount must be > 0' }
@@ -100,6 +117,7 @@ sub create_checkout {
     my $token  = $self->retrieve_data('SquareAccessToken') // '';
     my $cur    = $self->retrieve_data('Currency') // 'USD';
     my $square_version = $self->retrieve_data('SquareVersion') // '2025-01-23';
+    my $environment = $self->retrieve_data('SquareEnvironment') // 'sandbox';
 
     return $c->render(
         status => 500, format => 'json',
@@ -133,6 +151,7 @@ sub create_checkout {
         token         => $token,
         square_version=> $square_version,
         method        => 'POST',
+        environment   => $environment,
         path          => '/v2/terminals/checkouts',
         payload       => $payload,
     );
@@ -180,6 +199,7 @@ sub create_pos_checkout {
     my $token  = $self->retrieve_data('SquareAccessToken') // '';
     my $cur    = $self->retrieve_data('Currency') // 'USD';
     my $square_version = $self->retrieve_data('SquareVersion') // '2025-01-23';
+    my $environment = $self->retrieve_data('SquareEnvironment') // 'sandbox';
 
     return $c->render(
         status => 500,
@@ -214,6 +234,7 @@ sub create_pos_checkout {
     my $res = _square_request(
         token          => $token,
         square_version => $square_version,
+        environment    => $environment,
         method         => 'POST',
         path           => '/v2/terminals/checkouts',
         payload        => $payload,
@@ -257,6 +278,7 @@ sub get_checkout {
     my $self   = Koha::Plugin::Com::ByWaterSolutions::SquareTerminal->new({});
     my $token  = $self->retrieve_data('SquareAccessToken') // '';
     my $square_version = $self->retrieve_data('SquareVersion') // '2025-01-23';
+    my $environment = $self->retrieve_data('SquareEnvironment') // 'sandbox';
 
     return $c->render(
         status => 500, format => 'json',
@@ -266,6 +288,7 @@ sub get_checkout {
     my $res = _square_request(
         token          => $token,
         square_version => $square_version,
+        environment    => $environment,
         method         => 'GET',
         path           => "/v2/terminals/checkouts/$checkout_id",
     );
@@ -301,6 +324,7 @@ sub dismiss_checkout {
     my $self   = Koha::Plugin::Com::ByWaterSolutions::SquareTerminal->new({});
     my $token  = $self->retrieve_data('SquareAccessToken') // '';
     my $square_version = $self->retrieve_data('SquareVersion') // '2025-01-23';
+    my $environment = $self->retrieve_data('SquareEnvironment') // 'sandbox';
 
     return $c->render(
         status => 500, format => 'json',
@@ -310,6 +334,7 @@ sub dismiss_checkout {
     my $res = _square_request(
         token          => $token,
         square_version => $square_version,
+        environment    => $environment,
         method         => 'POST',
         path           => "/v2/terminals/checkouts/$checkout_id/dismiss",
         payload        => {},
@@ -350,6 +375,7 @@ sub finalize_checkout {
     my $self   = Koha::Plugin::Com::ByWaterSolutions::SquareTerminal->new({});
     my $token  = $self->retrieve_data('SquareAccessToken') // '';
     my $square_version = $self->retrieve_data('SquareVersion') // '2025-01-23';
+    my $environment = $self->retrieve_data('SquareEnvironment') // 'sandbox';
 
     return $c->render(
         status => 500, format => 'json',
@@ -360,6 +386,7 @@ sub finalize_checkout {
     my $res = _square_request(
         token          => $token,
         square_version => $square_version,
+        environment    => $environment,
         method         => 'GET',
         path           => "/v2/terminals/checkouts/$checkout_id",
     );
@@ -384,19 +411,100 @@ sub finalize_checkout {
 
     my $note = $payment_id ? "Square payment_id: $payment_id" : "Square checkout_id: $checkout_id";
 
-    my $amount = 0;
-    $amount += $_->amountoutstanding for @accountlines;
-    $amount = sprintf("%.2f", $amount);
+    my $payment_res = _square_request(
+    token          => $token,
+    square_version => $square_version,
+    environment    => $environment,
+    method         => 'GET',
+    path           => "/v2/payments/$payment_id",
+);
 
-    my $patron_id = $accountlines[0]->borrowernumber;
-    my $d = Koha::Account->new({ patron_id => $patron_id })->pay({
+return $c->render(
+    status => $payment_res->{status},
+    format => 'json',
+    json   => $payment_res->{json}
+        // {
+            error       => 'SQUARE',
+            description => $payment_res->{error}
+                // 'Unable to retrieve Square payment',
+        }
+) unless $payment_res->{ok};
+
+my $payment = $payment_res->{json}->{payment} || {};
+
+return $c->render(
+    status => 409,
+    format => 'json',
+    json   => {
+        error       => 'PAYMENT_NOT_COMPLETE',
+        description => 'Square payment is not completed',
+    }
+) unless ( $payment->{status} // '' ) eq 'COMPLETED';
+
+
+my $amount_money = $payment->{amount_money};
+
+return $c->render(
+    status => 409,
+    format => 'json',
+    json   => {
+        error       => 'INVALID_PAYMENT_AMOUNT',
+        description => 'Square payment amount information is unavailable',
+    }
+) unless $amount_money
+    && ref($amount_money) eq 'HASH';
+
+my $square_amount_cents = $amount_money->{amount};
+
+return $c->render(
+    status => 409,
+    format => 'json',
+    json   => {
+        error       => 'INVALID_PAYMENT_AMOUNT',
+        description => 'Square payment amount is unavailable',
+    }
+) unless defined $square_amount_cents
+    && $square_amount_cents =~ /^\d+$/
+    && $square_amount_cents > 0;
+
+my $amount = sprintf '%.2f', $square_amount_cents / 100;
+
+my $userenv = C4::Context->userenv;
+
+return $c->render(
+    status => 401,
+    format => 'json',
+    json   => {
+        error       => 'NO_STAFF_SESSION',
+        description => 'The Koha staff session is unavailable during payment finalization',
+    }
+) unless $userenv
+    && ref($userenv) eq 'HASH'
+    && $userenv->{branch};
+
+my $patron_id = $accountlines[0]->borrowernumber;
+
+my $d = Koha::Account->new(
+    { patron_id => $patron_id }
+)->pay(
+    {
         amount       => $amount,
         note         => $note,
-        description  => "Payment via Square Terminal",
-        library_id   => C4::Context->userenv->{branch},
+        description  => 'Payment via Square Terminal',
+        library_id   => $userenv->{branch},
         lines        => \@accountlines,
-        payment_type => "CREDITCARD",
-    });
+        payment_type => 'CREDITCARD',
+    }
+);
+
+return $c->render(
+    status => 500,
+    format => 'json',
+    json   => {
+        error       => 'KOHA_PAYMENT_FAILED',
+        description => 'Koha did not return payment information',
+    }
+) unless $d && ref($d) eq 'HASH';
 
     return $c->render(
         status => 200,
@@ -406,6 +514,153 @@ sub finalize_checkout {
             payment_id => $d->{payment_id},
             checkout_id=> $checkout_id,
             square_payment_id => $payment_id,
+        }
+    );
+}
+
+=head2 webhook
+
+Receives and validates Square Terminal webhook notifications.
+
+Square signs the exact notification URL concatenated with the raw HTTP
+request body. The signature is supplied in the
+x-square-hmacsha256-signature request header.
+
+=cut
+
+sub webhook {
+    my $c = shift;
+
+    my $plugin =
+        Koha::Plugin::Com::ByWaterSolutions::SquareTerminal->new( {} );
+
+    my $signature_key =
+        $plugin->retrieve_data('WebhookSignatureKey') // '';
+
+    my $notification_url =
+        $plugin->retrieve_data('WebhookUrl') // '';
+
+    return $c->render(
+        status => 500,
+        format => 'json',
+        json   => {
+            error       => 'CONFIG',
+            description => 'WebhookSignatureKey is not configured',
+        }
+    ) unless $signature_key;
+
+    return $c->render(
+        status => 500,
+        format => 'json',
+        json   => {
+            error       => 'CONFIG',
+            description => 'WebhookUrl is not configured',
+        }
+    ) unless $notification_url;
+
+    my $square_signature =
+        $c->req->headers->header('x-square-hmacsha256-signature') // '';
+
+    return $c->render(
+        status => 401,
+        format => 'json',
+        json   => {
+            error       => 'INVALID_SIGNATURE',
+            description => 'Square webhook signature header is missing',
+        }
+    ) unless $square_signature;
+
+    # It is important to use the untouched/raw request body here.
+    my $raw_body = $c->req->body // '';
+
+    my $expected_signature = encode_base64(
+        hmac_sha256(
+            $notification_url . $raw_body,
+            $signature_key
+        ),
+        ''
+    );
+
+    unless ( _secure_compare( $expected_signature, $square_signature ) ) {
+        warn sprintf(
+            "Square Terminal webhook signature validation failed for URL %s",
+            $notification_url
+        );
+
+        return $c->render(
+            status => 401,
+            format => 'json',
+            json   => {
+                error       => 'INVALID_SIGNATURE',
+                description => 'Square webhook signature validation failed',
+            }
+        );
+    }
+
+    my $event;
+
+    try {
+        $event = decode_json($raw_body);
+    }
+    catch {
+        warn "Unable to decode Square webhook JSON: $_";
+
+        return $c->render(
+            status => 400,
+            format => 'json',
+            json   => {
+                error       => 'INVALID_PAYLOAD',
+                description => 'Webhook body is not valid JSON',
+            }
+        );
+    };
+
+    my $event_id   = $event->{event_id} // '';
+    my $event_type = $event->{type}     // '';
+
+    my $checkout =
+           $event->{data}
+        && $event->{data}->{object}
+        && $event->{data}->{object}->{checkout}
+        ? $event->{data}->{object}->{checkout}
+        : {};
+
+    my $checkout_id = $checkout->{id}           // '';
+    my $status      = $checkout->{status}       // '';
+    my $reference   = $checkout->{reference_id} // '';
+
+    warn sprintf(
+        'Square Terminal webhook received: event_id=%s type=%s checkout_id=%s status=%s reference_id=%s',
+        $event_id,
+        $event_type,
+        $checkout_id,
+        $status,
+        $reference,
+    );
+
+    if (
+           $event_type eq 'terminal.checkout.created'
+        || $event_type eq 'terminal.checkout.updated'
+      )
+    {
+        _handle_terminal_checkout_event(
+            plugin      => $plugin,
+            event       => $event,
+            checkout    => $checkout,
+            event_id    => $event_id,
+            event_type  => $event_type,
+            checkout_id => $checkout_id,
+            status      => $status,
+            reference   => $reference,
+        );
+    }
+
+    # Square expects a successful 2xx response promptly.
+    return $c->render(
+        status => 200,
+        format => 'json',
+        json   => {
+            received => true,
         }
     );
 }
@@ -437,11 +692,31 @@ sub _square_request {
 
     my $token          = $args{token};
     my $square_version = $args{square_version} || '2025-01-23';
+    my $environment    = $args{environment} || 'sandbox';
     my $method         = $args{method} || 'GET';
     my $path           = $args{path} || '/';
     my $payload        = $args{payload};
 
-    my $base = 'https://connect.squareupsandbox.com';
+    my $base;
+
+    if ( $environment eq 'production' ) {
+        $base = 'https://connect.squareup.com';
+    }
+    elsif ( $environment eq 'sandbox' ) {
+        $base = 'https://connect.squareupsandbox.com';
+    }
+    else {
+        return {
+            ok     => 0,
+            status => 500,
+            error  => "Invalid SquareEnvironment value: $environment",
+            json   => {
+                error       => 'CONFIG',
+                description => 'SquareEnvironment must be sandbox or production',
+            },
+        };
+    }
+
     my $url  = $base . $path;
 
     my $ua = LWP::UserAgent->new( timeout => 30 );
@@ -504,6 +779,66 @@ sub _uuid {
     substr $uuid, 6, 1, chr( ord( substr( $uuid, 6, 1 ) ) & 0x0f | 0x40 );
     return join '', map { unpack 'H*', $_ }
       map { substr $uuid, 0, $_, '' } ( 4, 2, 2, 2, 6 );
+}
+
+sub _secure_compare {
+    my ( $expected, $received ) = @_;
+
+    return 0 unless defined $expected && defined $received;
+    return 0 unless length($expected) == length($received);
+
+    my $difference = 0;
+
+    for my $index ( 0 .. length($expected) - 1 ) {
+        $difference |=
+            ord( substr( $expected, $index, 1 ) )
+          ^ ord( substr( $received, $index, 1 ) );
+    }
+
+    return $difference == 0;
+}
+
+sub _handle_terminal_checkout_event {
+    my (%args) = @_;
+
+    my $event_type  = $args{event_type}  // '';
+    my $event_id    = $args{event_id}    // '';
+    my $checkout_id = $args{checkout_id} // '';
+    my $status      = $args{status}      // '';
+    my $reference   = $args{reference}   // '';
+
+    return unless $checkout_id;
+
+    if ( $status eq 'COMPLETED' ) {
+        warn sprintf(
+            'Square Terminal checkout completed: event_id=%s checkout_id=%s reference_id=%s',
+            $event_id,
+            $checkout_id,
+            $reference,
+        );
+
+        # Do not create the Koha payment here yet.
+        #
+        # The current browser flow calls finalize_checkout after polling
+        # detects COMPLETED. Creating the payment here as well would risk
+        # recording the same Square payment twice.
+    }
+    elsif ( $status eq 'CANCELED' || $status eq 'CANCELLED' ) {
+        warn sprintf(
+            'Square Terminal checkout canceled: event_id=%s checkout_id=%s',
+            $event_id,
+            $checkout_id,
+        );
+    }
+    elsif ( $status eq 'FAILED' ) {
+        warn sprintf(
+            'Square Terminal checkout failed: event_id=%s checkout_id=%s',
+            $event_id,
+            $checkout_id,
+        );
+    }
+
+    return;
 }
 
 1;
