@@ -17,8 +17,7 @@
 
 use Modern::Perl;
 
-use Test::More tests => 3;
-use Test::NoWarnings;
+use Test::More;
 use File::Spec;
 use File::Find;
 
@@ -26,6 +25,7 @@ find(
     {
         bydepth  => 1,
         no_chdir => 1,
+        preprocess => sub { grep { $_ !~ /^\./ } @_ },
         wanted   => sub {
             my $m = $_;
             return unless $m =~ s/[.]pm$//;
@@ -45,3 +45,5 @@ find(
     },
     '.'
 );
+
+done_testing();

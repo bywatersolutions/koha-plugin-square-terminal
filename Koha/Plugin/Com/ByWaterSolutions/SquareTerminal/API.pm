@@ -10,6 +10,7 @@ use HTTP::Request::Common qw( GET POST );
 use LWP::UserAgent;
 use Mojo::JSON qw( encode_json decode_json true );
 use Try::Tiny;
+use UUID;
 use YAML qw( Load );
 
 use C4::Context;
@@ -794,13 +795,10 @@ sub _square_request {
 }
 
 sub _uuid {
-    my $uuid = '';
-    for ( 1 .. 4 ) {
-        $uuid .= pack 'I', int( rand( 2**32 ) );
-    }
-    substr $uuid, 6, 1, chr( ord( substr( $uuid, 6, 1 ) ) & 0x0f | 0x40 );
-    return join '', map { unpack 'H*', $_ }
-      map { substr $uuid, 0, $_, '' } ( 4, 2, 2, 2, 6 );
+    my ( $uuid, $string );
+    UUID::generate($uuid);
+    UUID::unparse( $uuid, $string );
+    return $string;
 }
 
 sub _secure_compare {
