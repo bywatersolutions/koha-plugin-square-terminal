@@ -2,6 +2,10 @@ WORK IN PROGRESS -- NOT READY TO BE USED
 
 # Square Terminal Plugin for Koha
 
+[![CI](https://github.com/bywatersolutions/koha-plugin-square-terminal/actions/workflows/main.yml/badge.svg)](https://github.com/bywatersolutions/koha-plugin-square-terminal/actions/workflows/main.yml)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/bywatersolutions/koha-plugin-square-terminal)](https://github.com/bywatersolutions/koha-plugin-square-terminal/releases)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 Adds Square Terminal card-present payments to Koha (patron payments + POS)
 
 ---
