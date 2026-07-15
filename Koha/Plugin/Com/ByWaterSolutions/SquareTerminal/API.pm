@@ -411,6 +411,28 @@ sub finalize_checkout {
 
     my $note = $payment_id ? "Square payment_id: $payment_id" : "Square checkout_id: $checkout_id";
 
+    # Idempotency guard: check if this Square payment has already been finalized
+    my $existing_payment = Koha::Account::Lines->search(
+        {
+            credit_type_code => 'PAYMENT',
+            note             => $note,
+        }
+    )->next;
+
+    if ($existing_payment) {
+        return $c->render(
+            status => 200,
+            format => 'json',
+            json   => {
+                ret               => 0,
+                payment_id        => $existing_payment->accountlines_id,
+                checkout_id       => $checkout_id,
+                square_payment_id => $payment_id,
+                idempotent        => 1,
+            }
+        );
+    }
+
     my $payment_res = _square_request(
     token          => $token,
     square_version => $square_version,
