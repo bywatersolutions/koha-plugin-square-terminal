@@ -16,7 +16,11 @@
       "produces": ["application/json"],
       "responses": {
         "200": { "description": "JSON data of accountlines + computed total" },
-        "400": { "description": "Bad request" }
+        "400": { "description": "Bad request" },
+        "403": { "description": "Insufficient permissions" }
+      },
+      "x-koha-authorization": {
+        "permissions": { "updatecharges": "1" }
       }
     }
   },
@@ -46,8 +50,12 @@
       "responses": {
         "200": { "description": "Square checkout created" },
         "400": { "description": "Bad request" },
+        "403": { "description": "Insufficient permissions" },
         "404": { "description": "No mapped Square device for this register" },
         "500": { "description": "Configuration error" }
+      },
+      "x-koha-authorization": {
+        "permissions": { "updatecharges": "1" }
       }
     }
   },
@@ -77,8 +85,12 @@
       "responses": {
         "200": { "description": "Square POS checkout created" },
         "400": { "description": "Bad request" },
+        "403": { "description": "Insufficient permissions" },
         "404": { "description": "No mapped Square device for this register" },
         "500": { "description": "Configuration error" }
+      },
+      "x-koha-authorization": {
+        "permissions": { "updatecharges": "1" }
       }
     }
   },
@@ -101,7 +113,11 @@
       "responses": {
         "200": { "description": "Square checkout status response" },
         "400": { "description": "Bad request" },
+        "403": { "description": "Insufficient permissions" },
         "500": { "description": "Configuration error" }
+      },
+      "x-koha-authorization": {
+        "permissions": { "updatecharges": "1" }
       }
     }
   },
@@ -124,7 +140,11 @@
       "responses": {
         "200": { "description": "Dismiss request accepted" },
         "400": { "description": "Bad request" },
+        "403": { "description": "Insufficient permissions" },
         "500": { "description": "Configuration error" }
+      },
+      "x-koha-authorization": {
+        "permissions": { "updatecharges": "1" }
       }
     }
   },
@@ -154,34 +174,29 @@
       "responses": {
         "200": { "description": "Koha payment created and applied to selected lines" },
         "400": { "description": "Bad request" },
+        "403": { "description": "Insufficient permissions" },
         "409": { "description": "Checkout not completed yet" },
         "500": { "description": "Configuration error" }
+      },
+      "x-koha-authorization": {
+        "permissions": { "updatecharges": "1" }
       }
     }
   },
 
-"/webhook": {
-  "post": {
-    "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#webhook",
-    "operationId": "SquareTerminalWebhook",
-    "tags": ["square_terminal"],
-    "consumes": ["application/json"],
-    "produces": ["application/json"],
-    "responses": {
-      "200": {
-        "description": "Square webhook accepted"
-      },
-      "400": {
-        "description": "Invalid webhook payload"
-      },
-      "401": {
-        "description": "Invalid Square webhook signature"
-      },
-      "500": {
-        "description": "Webhook configuration error"
+  "/webhook": {
+    "post": {
+      "x-mojo-to": "Com::ByWaterSolutions::SquareTerminal::API#webhook",
+      "operationId": "SquareTerminalWebhook",
+      "tags": ["square_terminal"],
+      "consumes": ["application/json"],
+      "produces": ["application/json"],
+      "responses": {
+        "200": { "description": "Square webhook accepted" },
+        "400": { "description": "Invalid webhook payload" },
+        "401": { "description": "Invalid Square webhook signature" },
+        "500": { "description": "Webhook configuration error" }
       }
     }
   }
-}
-
 }

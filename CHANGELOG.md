@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - [#3] Add idempotency guard to finalize_checkout to prevent double-charging
+- [#4] Add x-koha-authorization (updatecharges permission) to API endpoints
 
 ## [0.1.0] - 2026-07-15
 
