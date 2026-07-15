@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- [#2] Extract inline JS from intranet_js to a separate static file
+
 ## [0.1.0] - 2026-07-15
 
 ### Added
@@ -22,14 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - [#1] Fix 00-load.t to scan from plugin root directory
-  - Automated version management via npm version (package.json)
-  - Local KPZ builds via gulp (gulpfile.js)
-  - Changelog automation scripts (stamp-changelog.pl, open-next-changelog.pl)
-  - Docker-based KPZ builder in CI
-  - Branch safety check (only release from main)
-  - Upgrade path testing
-  - JUnit test reporting
-  - .editorconfig for consistent formatting
 
 ## [0.0.3] - 2026-07-10
 
