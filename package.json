@@ -1,6 +1,6 @@
 {
     "name": "koha-plugin-square-terminal",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Square Terminal card-present payments plugin for Koha",
     "devDependencies": {
         "gulp": "^5.0.1",
