@@ -118,6 +118,49 @@ You can find your device ID in the Square Developer Dashboard.
 
 ---
 
+## 🛠️ Developer notes
+
+### Releasing
+
+Releases **must** go through `npm version`. Do not create tags or releases from the GitHub UI directly.
+
+```bash
+npm version patch    # or minor, or major
+git push --follow-tags
+```
+
+This single command:
+
+1. Updates `$VERSION` in `SquareTerminal.pm`
+2. Updates `version` in `PLUGIN.yml`
+3. Stamps the `[Unreleased]` section in `CHANGELOG.md` with the version and date
+4. Creates a git tag (`v*.*.*`)
+5. Opens the next development cycle in `CHANGELOG.md`
+
+Pushing the tag triggers CI, which runs tests and (on success) builds the KPZ and creates the GitHub Release.
+
+### Development setup
+
+```bash
+# Install Node.js dev dependencies (for version tooling)
+npm install
+
+# Build a KPZ locally
+npx gulp build
+
+# Run tests in KTD
+ktd --name square-terminal --proxy --single-plugin ~/git/koha-plugins/square-terminal up -d
+ktd --name square-terminal --wait-ready 120
+ktd --name square-terminal --shell --run "cd /kohadevbox/koha && perl misc/devel/install_plugins.pl"
+ktd --name square-terminal --shell --run "
+  cd /kohadevbox/plugins/square-terminal &&
+  export PERL5LIB=\$PERL5LIB:. &&
+  prove -v -r t/
+"
+```
+
+---
+
 ## 👩‍💻 Author
 
 Laura Escamilla
