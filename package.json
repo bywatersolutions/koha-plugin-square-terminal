@@ -7,7 +7,7 @@
         "gulp-cli": "^3.0.0"
     },
     "scripts": {
-        "preversion": "sed -i -e \"s/^our \\$VERSION = .*/our \\$VERSION = \\\"$npm_new_version\\\";/\" Koha/Plugin/Com/ByWaterSolutions/SquareTerminal.pm; sed -i -e \"s/^version: .*/version: $npm_new_version/\" Koha/Plugin/Com/ByWaterSolutions/SquareTerminal/PLUGIN.yml; perl scripts/stamp-changelog.pl v$npm_new_version; git add -u; rm -f Koha/Plugin/Com/ByWaterSolutions/SquareTerminal.pm-e Koha/Plugin/Com/ByWaterSolutions/SquareTerminal/PLUGIN.yml-e",
+        "preversion": "sed -i -e \"s/^our \\$VERSION[[:space:]]*= .*/our \\$VERSION         = \\\"$npm_new_version\\\";/\" Koha/Plugin/Com/ByWaterSolutions/SquareTerminal.pm; sed -i -e \"s/^version: .*/version: $npm_new_version/\" Koha/Plugin/Com/ByWaterSolutions/SquareTerminal/PLUGIN.yml; perl scripts/stamp-changelog.pl v$npm_new_version; git add -u; rm -f Koha/Plugin/Com/ByWaterSolutions/SquareTerminal.pm-e Koha/Plugin/Com/ByWaterSolutions/SquareTerminal/PLUGIN.yml-e",
         "postversion": "perl scripts/open-next-changelog.pl v$npm_package_version; git add CHANGELOG.md; git commit -m 'Open next development cycle'",
         "test": "echo \"Error: no test specified\" && exit 1",
         "kpz": "echo -n ${npm_package_name}-v${npm_package_version}.kpz",

@@ -14,7 +14,7 @@ use Mojo::JSON qw(decode_json);
 use Encode;
 
 ## Here we set our plugin version
-our $VERSION         = "0.0.3";
+our $VERSION         = "0.1.0";
 our $MINIMUM_VERSION = "25.05";
 
 ## Here is our metadata, some keys are required, some are optional
