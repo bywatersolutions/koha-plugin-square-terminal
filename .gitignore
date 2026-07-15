@@ -1,2 +1,4 @@
 *.kpz
 *.tar.gz
+node_modules/
+dist/

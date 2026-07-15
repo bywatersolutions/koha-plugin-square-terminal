@@ -1,0 +1,26 @@
+{
+    "name": "koha-plugin-square-terminal",
+    "version": "0.0.3",
+    "description": "Square Terminal card-present payments plugin for Koha",
+    "devDependencies": {
+        "gulp": "^5.0.1",
+        "gulp-cli": "^3.0.0"
+    },
+    "scripts": {
+        "preversion": "sed -i -e \"s/^our \\$VERSION = .*/our \\$VERSION = \\\"$npm_new_version\\\";/\" Koha/Plugin/Com/ByWaterSolutions/SquareTerminal.pm; perl scripts/stamp-changelog.pl v$npm_new_version; git add -u; rm -f Koha/Plugin/Com/ByWaterSolutions/SquareTerminal.pm-e",
+        "postversion": "perl scripts/open-next-changelog.pl v$npm_package_version; git add CHANGELOG.md; git commit -m 'Open next development cycle'",
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "kpz": "echo -n ${npm_package_name}-v${npm_package_version}.kpz",
+        "print-name": "echo -n ${npm_package_name}"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/bywatersolutions/koha-plugin-square-terminal.git"
+    },
+    "author": "Laura Escamilla",
+    "license": "GPL-3.0",
+    "bugs": {
+        "url": "https://github.com/bywatersolutions/koha-plugin-square-terminal/issues"
+    },
+    "homepage": "https://github.com/bywatersolutions/koha-plugin-square-terminal"
+}

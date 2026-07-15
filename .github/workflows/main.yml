@@ -4,10 +4,8 @@ on:
   pull_request:
     branches:
       - main
-    tags:
-      - 'v*.*.*'
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "0 6 1,15 * *"
 
 jobs:
   unit_tests:
@@ -20,7 +18,9 @@ jobs:
 
     steps:
     - name: Checkout plugin code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
 
     - name: Get Koha Version Branch Name
       id: koha-version
@@ -55,22 +55,74 @@ jobs:
         cd ../koha-testing-docker
         export LOCAL_USER_ID=$(id -u)
         export KTD_HOME=$(pwd)
+        export SKIP_L10N=yes
+        if [ "${{ matrix.koha-version }}" = "main" ]; then
+          export KOHA_IMAGE=main
+        else
+          export KOHA_IMAGE=${{ steps.koha-version.outputs.version-major-minor }}
+        fi
         ktd --name square-terminal --plugins up -d
 
     - name: Wait for KTD to be ready
       run: |
         cd ../koha-testing-docker
         export KTD_HOME=$(pwd)
-        ktd --name square-terminal --wait-ready 120
+        ktd --name square-terminal --wait-ready 240
 
-    - name: Run plugin tests
+    - name: Install plugins in KTD (fresh install)
+      run: |
+        export KTD_HOME=$(pwd)/../koha-testing-docker
+        ktd --name square-terminal --shell --run "cd /kohadevbox/koha && perl misc/devel/install_plugins.pl"
+
+    - name: Run plugin tests (fresh install)
       run: |
         export KTD_HOME=$(pwd)/../koha-testing-docker
         ktd --name square-terminal --shell --run "
           cd /kohadevbox/plugins/${{ env.GITHUB_REPO }} &&
           export PERL5LIB=\$PERL5LIB:. &&
-          prove -v -r -s t/
+          sudo cpanm --notest TAP::Harness::JUnit &&
+          JUNIT_OUTPUT_FILE=junit_fresh.xml prove -v -r -s t/ --harness=TAP::Harness::JUnit
         "
+
+    - name: Reset database for upgrade test
+      run: |
+        export KTD_HOME=$(pwd)/../koha-testing-docker
+        echo "=== Resetting Koha database ==="
+        ktd --name square-terminal --shell --run "bash -c 'source ~/.bashrc && echo y | reset_all'"
+
+    - name: Test upgrade path from v0.0.3
+      run: |
+        export KTD_HOME=$(pwd)/../koha-testing-docker
+        # Save current HEAD
+        CURRENT_HEAD=$(git rev-parse HEAD)
+        # Checkout v0.0.3 and install
+        git checkout v0.0.3 || echo "Tag v0.0.3 not found, skipping upgrade test"
+        if git rev-parse --verify v0.0.3 >/dev/null 2>&1; then
+          ktd --name square-terminal --shell --run "cd /kohadevbox/koha && perl misc/devel/install_plugins.pl"
+          # Return to current HEAD and upgrade
+          git checkout $CURRENT_HEAD
+          ktd --name square-terminal --shell --run "cd /kohadevbox/koha && perl misc/devel/install_plugins.pl"
+        else
+          echo "No previous release tag found - skipping upgrade test"
+        fi
+
+    - name: Run plugin tests (after upgrade)
+      run: |
+        export KTD_HOME=$(pwd)/../koha-testing-docker
+        ktd --name square-terminal --shell --run "
+          cd /kohadevbox/plugins/${{ env.GITHUB_REPO }} &&
+          export PERL5LIB=\$PERL5LIB:. &&
+          JUNIT_OUTPUT_FILE=junit_upgrade.xml prove -v -r -s t/ --harness=TAP::Harness::JUnit
+        "
+
+    - name: Publish test results
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      if: always()
+      with:
+        files: |
+          junit_fresh.xml
+          junit_upgrade.xml
+        check_name: "Test Results (Koha ${{ matrix.koha-version }})"
 
     - name: Show logs on failure
       if: failure()
@@ -97,7 +149,23 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+
+    - name: Check if tag is on main branch
+      id: check-branch
+      run: |
+        # Get the commit the tag points to
+        TAG_COMMIT=$(git rev-list -n 1 ${{ github.ref }})
+        # Check if this commit is on main branch
+        if git branch -r --contains $TAG_COMMIT | grep -q 'origin/main'; then
+          echo "on_main=true" >> $GITHUB_OUTPUT
+          echo "Tag is on main branch, proceeding with release"
+        else
+          echo "on_main=false" >> $GITHUB_OUTPUT
+          echo "Tag is NOT on main branch, skipping release"
+        fi
 
     - name: Parse out and store the GitHub repository name
       id: myvars
@@ -123,28 +191,22 @@ jobs:
       run: |
         echo "Current oldstable version: ${{ steps.koha-version-oldstable.outputs.version-major-minor }}"
 
-    - name: Dump myvars outputs
-      env:
-        GITHUB_CONTEXT: ${{ toJson(steps.myvars.outputs) }}
-      run: echo "$GITHUB_CONTEXT"
-
     - name: Build Koha Plugin kpz artifact
+      if: steps.check-branch.outputs.on_main == 'true'
       id: kpz
-      uses: "bywatersolutions/github-action-koha-plugin-create-kpz@master"
-      with:
-        release-version: ${{ steps.myvars.outputs.tag_version }}
-        release-name: ${{ steps.myvars.outputs.github_repo }}
-        minimum-version: ${{ steps.koha-version-oldstable.outputs.version-major-minor }}
-        plugin-module: "Koha/Plugin/Com/ByWaterSolutions/SquareTerminal.pm"
+      run: |
+        docker run -v ${PWD}:/plugin registry.gitlab.com/thekesolutions/tools/koha-plugin-builder
+        echo "filename=$(ls *.kpz)" >> $GITHUB_OUTPUT
 
     - name: See if kpz was created
+      if: steps.check-branch.outputs.on_main == 'true'
       run: |
         echo "FILENAME: ${{ steps.kpz.outputs.filename }}"
         ls -alh
 
     - name: Release
-      uses: softprops/action-gh-release@v2
-      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v3
+      if: startsWith(github.ref, 'refs/tags/') && steps.check-branch.outputs.on_main == 'true'
       with:
         files: |
           ${{ steps.kpz.outputs.filename }}
@@ -156,7 +218,7 @@ jobs:
     name: Keep Alive
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Check age and push commit if needed
       run: |
         LAST_COMMIT=$( git --no-pager log -1 --format=%ct )
