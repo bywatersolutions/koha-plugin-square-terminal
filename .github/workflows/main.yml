@@ -66,7 +66,7 @@ jobs:
     - name: Run plugin tests
       run: |
         export KTD_HOME=$(pwd)/../koha-testing-docker
-        ktd --name galadriel --shell --run "
+        ktd --name square-terminal --shell --run "
           cd /kohadevbox/plugins/${{ env.GITHUB_REPO }} &&
           export PERL5LIB=\$PERL5LIB:. &&
           prove -v -r -s t/
