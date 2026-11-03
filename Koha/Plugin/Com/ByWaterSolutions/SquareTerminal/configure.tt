@@ -20,7 +20,7 @@
     [% INCLUDE 'csrf-token.inc' %]
     <input type="hidden" name="class" value="[% CLASS %]" />
     <input type="hidden" name="method" value="[% METHOD %]" />
-    <input type="hidden" name="save" value="1" />
+
 
     <fieldset>
       <legend>Square Terminal configuration</legend>
@@ -143,31 +143,245 @@
       <hr />
 
       <div class="form-group">
-        <label for="RegisterMapping">Register → Square device mapping</label>
-        <textarea
-          class="form-control"
-          id="RegisterMapping"
-          name="RegisterMapping"
-          rows="10"
-          aria-describedby="RegisterMappingHelp"
-        >[% RegisterMapping | html %]</textarea>
+        <h3>Available Koha cash registers</h3>
+        <p class="hint">
+          These registers are automatically retrieved from Koha.
+          You can use their IDs when configuring Square Terminal mappings.
+        </p>
 
-        <small id="RegisterMappingHelp" class="hint">
-          YAML mapping of Koha register IDs to Square <code>device_id</code> values. Example:
-          <pre>
-1: "DEVICE_ID_FOR_REGISTER_1"
-3: "DEVICE_ID_FOR_REGISTER_3"
-          </pre>
-        </small>
+        [% IF KohaRegisters.size %]
+          <table class="table table-striped">
+            <thead>
+              <tr>
+                <th scope="col">Register ID</th>
+                <th scope="col">Register name</th>
+                <th scope="col">Library</th>
+              </tr>
+            </thead>
+            <tbody>
+              [% FOREACH register IN KohaRegisters %]
+                <tr>
+                  <td>[% register.id | html %]</td>
+                  <td>[% register.name | html %]</td>
+                  <td>[% register.branch | html %]</td>
+                </tr>
+              [% END %]
+            </tbody>
+          </table>
+        [% ELSE %]
+          <div class="alert alert-warning">
+            No Koha cash registers were found.
+            Create a cash register in Koha before configuring Square Terminal.
+          </div>
+        [% END %]
       </div>
+
+      [% IF DiscoveryAttempted %]
+        <div class="form-group">
+          <h3>Square device discovery</h3>
+
+          [% IF DiscoveryError %]
+            <div class="alert alert-danger" role="alert">
+              [% DiscoveryError | html %]
+            </div>
+          [% ELSIF SquareDevices.size %]
+            <table class="table table-striped">
+              <thead>
+                <tr>
+                  <th scope="col">Device name</th>
+                  <th scope="col">Model</th>
+                  <th scope="col">Device ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                [% FOREACH device IN SquareDevices %]
+                  <tr>
+                    <td>[% device.attributes.name | html %]</td>
+                    <td>[% device.attributes.model | html %]</td>
+                    <td><code>[% device.id | html %]</code></td>
+                  </tr>
+                [% END %]
+              </tbody>
+            </table>
+          [% ELSE %]
+            <div class="alert alert-info" role="status">
+              Square returned no devices for this account.
+            </div>
+          [% END %]
+        </div>
+      [% END %]
+
+      <div class="form-group">
+        [% IF ValidationErrors.size %]
+          <div class="alert alert-danger" role="alert" id="square-validation-errors">
+            <h3>Please correct the following assignments</h3>
+            <ul>
+              [% FOREACH error IN ValidationErrors %]
+                <li>[% error | html %]</li>
+              [% END %]
+            </ul>
+            <p>Your existing Square Terminal configuration has not been changed.</p>
+          </div>
+        [% END %]
+
+        <h3>Square Terminal assignments</h3>
+        <p class="hint">
+          Assign one default Square Terminal to each Koha cash register.
+          Use Add another to create additional assignments.
+        </p>
+
+        <div id="square-register-mappings">
+          [% FOREACH assignment IN AssignmentRows %]
+            <div class="square-mapping-row form-group">
+              <div class="row">
+                <div class="col-md-5">
+                  <label>Koha cash register</label>
+                  <select class="form-control square-register-select" name="square_register_id">
+                    <option value="">Select a register</option>
+                    [% FOREACH register IN KohaRegisters %]
+                      <option value="[% register.id | html %]"
+                        [% IF register.id == assignment.register_id %]selected="selected"[% END %]>
+                        [% register.name | html %] — [% register.branch | html %]
+                      </option>
+                    [% END %]
+                  </select>
+                </div>
+                <div class="col-md-5">
+                  <label>Square Terminal</label>
+                  <select class="form-control square-device-select" name="square_device_id">
+                    <option value="">Select a device</option>
+
+                    [%- IF assignment.device_id && assignment.device_id != '9fa747a2-25ff-48ee-b078-04381f7c828f' %]
+                      <option value="[%- assignment.device_id | html -%]" selected="selected">
+                        Current: [%- assignment.device_id | html -%]
+                      </option>
+                    [%- END %]
+
+                    [%- IF SquareEnvironment == 'sandbox' %]
+                      <option value="9fa747a2-25ff-48ee-b078-04381f7c828f"
+                        [%- IF assignment.device_id == '9fa747a2-25ff-48ee-b078-04381f7c828f' %]selected="selected"[%- END %]>
+                        Sandbox Simulator — Successful Payment
+                      </option>
+                    [%- END %]
+
+                    [% FOREACH device IN SquareDevices %]
+                      [% IF device.id != assignment.device_id %]
+                        <option value="[% device.id | html %]">
+                          [% device.attributes.name | html %] — [% device.attributes.model | html %] ([% device.id | html %])
+                        </option>
+                      [% END %]
+                    [% END %]
+                  </select>
+                </div>
+                <div class="col-md-2">
+                  <label>Action</label>
+                  <button type="button" class="btn btn-default square-remove-mapping">
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          [% END %]
+        </div>
+
+        <button type="button" id="square-add-mapping" class="btn btn-default">
+          <i class="fa fa-plus" aria-hidden="true"></i>
+          Add another register / device
+        </button>
+
+        <p class="hint">
+          Registers must already exist in Koha.
+          Discover Square devices to populate the device choices.
+        </p>
+      </div>
+
+      <template id="square-mapping-template">
+        <div class="square-mapping-row form-group">
+          <div class="row">
+            <div class="col-md-5">
+              <label>Koha cash register</label>
+              <select class="form-control square-register-select" name="square_register_id">
+                <option value="">Select a register</option>
+                [% FOREACH register IN KohaRegisters %]
+                  <option value="[% register.id | html %]">
+                    [% register.name | html %] — [% register.branch | html %]
+                  </option>
+                [% END %]
+              </select>
+            </div>
+            <div class="col-md-5">
+              <label>Square Terminal</label>
+              <select class="form-control square-device-select" name="square_device_id">
+                <option value="">Select a device</option>
+
+                [%- IF SquareEnvironment == 'sandbox' %]
+                  <option value="9fa747a2-25ff-48ee-b078-04381f7c828f">
+                    Sandbox Simulator — Successful Payment
+                  </option>
+                [%- END %]
+
+                [% FOREACH device IN SquareDevices %]
+                  <option value="[% device.id | html %]">
+                    [% device.attributes.name | html %] — [% device.attributes.model | html %] ([% device.id | html %])
+                  </option>
+                [% END %]
+              </select>
+            </div>
+            <div class="col-md-2">
+              <label>Action</label>
+              <button type="button" class="btn btn-default square-remove-mapping">
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <hr />
 
     </fieldset>
 
     <div class="form-actions">
-      <button type="submit" class="btn btn-primary">Save configuration</button>
+      <button type="submit" name="save" value="1" class="btn btn-primary">
+        Save configuration
+      </button>
+      <button type="submit" name="discover" value="1" class="btn btn-default">
+        Discover Square devices
+      </button>
       <a class="btn btn-default" href="/cgi-bin/koha/plugins/plugins-home.pl">Cancel</a>
     </div>
   </form>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const container = document.getElementById('square-register-mappings');
+    const template = document.getElementById('square-mapping-template');
+    const addButton = document.getElementById('square-add-mapping');
+
+    if (!container || !template || !addButton) {
+        return;
+    }
+
+    function addMappingRow() {
+        const fragment = template.content.cloneNode(true);
+        container.appendChild(fragment);
+    }
+
+    addButton.addEventListener('click', addMappingRow);
+
+    container.addEventListener('click', function (event) {
+        const button = event.target.closest('.square-remove-mapping');
+
+        if (button) {
+            button.closest('.square-mapping-row').remove();
+        }
+    });
+
+    if (!container.querySelector('.square-mapping-row')) {
+        addMappingRow();
+    }
+});
+</script>
 
 [% INCLUDE 'intranet-bottom.inc' %]
