@@ -29,7 +29,6 @@ Square Terminal integration endpoints
 # ---------------------------
 
 sub get_debits {
-    warn "Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::get_debits";
     my $c = shift->openapi->valid_input or return;
 
     my $accountline_ids = $c->param('accountlines') // '';
@@ -68,7 +67,6 @@ Returns:
 =cut
 
 sub create_checkout {
-    warn "Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::create_checkout";
     my $c = shift->openapi->valid_input or return;
 
     my $accountline_ids = $c->param('accountlines') // '';
@@ -79,7 +77,50 @@ sub create_checkout {
         json   => { error => 'BAD_REQUEST', description => 'No valid accountline ids provided' }
     ) unless @ids;
 
-    my @accountlines = Koha::Account::Lines->search( { accountlines_id => \@ids } )->as_list;
+    # Reject duplicate accountline IDs before looking up charges.
+    my %seen_ids;
+    return $c->render(
+        status => 400,
+        format => 'json',
+        json   => {
+            error       => 'DUPLICATE_ACCOUNTLINES',
+            description => 'Duplicate accountline IDs are not allowed',
+        }
+    ) if grep { $seen_ids{$_}++ } @ids;
+
+    my @accountlines =
+        Koha::Account::Lines->search( { accountlines_id => \@ids } )->as_list;
+
+    return $c->render(
+        status => 409,
+        format => 'json',
+        json   => {
+            error       => 'ACCOUNTLINES_NOT_FOUND',
+            description => 'One or more selected accountlines no longer exist',
+        }
+    ) unless @accountlines == @ids;
+
+    # All selected charges must belong to the same patron.
+    my $patron_id = $accountlines[0]->borrowernumber;
+
+    return $c->render(
+        status => 409,
+        format => 'json',
+        json   => {
+            error       => 'ACCOUNTLINES_PATRON_MISMATCH',
+            description => 'All selected accountlines must belong to the same patron',
+        }
+    ) if grep { $_->borrowernumber ne $patron_id } @accountlines;
+
+    # Every selected charge must still have an outstanding balance.
+    return $c->render(
+        status => 409,
+        format => 'json',
+        json   => {
+            error       => 'ACCOUNTLINES_ALREADY_PAID',
+            description => 'One or more selected charges no longer have an outstanding balance',
+        }
+    ) if grep { $_->amountoutstanding <= 0 } @accountlines;
 
     # Compute amount from outstanding unless a cents amount is supplied
     my $amount_cents = $c->param('amount');
@@ -88,17 +129,18 @@ sub create_checkout {
             status => 400, format => 'json',
             json   => { error => 'BAD_REQUEST', description => 'Amount must be integer cents' }
         ) unless $amount_cents =~ /^\d+$/;
-    } else {
-        my $total = 0;
-        $total += $_->amountoutstanding for @accountlines;
-        $amount_cents = int( sprintf( "%.0f", $total * 100 ) );
     }
 
+    # Calculate the outstanding balance in cents.
     my $outstanding_total = 0;
-        $outstanding_total += $_->amountoutstanding for @accountlines;
+    $outstanding_total += $_->amountoutstanding for @accountlines;
 
     my $outstanding_cents =
         int( sprintf( '%.0f', $outstanding_total * 100 ) );
+
+    # Default to the full outstanding balance when no amount is supplied.
+    $amount_cents = $outstanding_cents
+        unless defined $amount_cents && $amount_cents ne '';
 
     return $c->render(
         status => 400,
@@ -125,10 +167,23 @@ sub create_checkout {
         json   => { error => 'CONFIG', description => 'SquareAccessToken not configured' }
     ) unless $token;
 
-    my $device_id = _device_id_for_register($self);
+    my $register_id = $c->param('register_id');
+
+    if ( defined $register_id && $register_id !~ /^\d+$/ ) {
+        return $c->render(
+            status => 400, format => 'json',
+            json   => { error => 'BAD_REQUEST', description => 'Invalid cash register ID' }
+        );
+    }
+
+    $register_id //= ( C4::Context->userenv || {} )->{register_id};
+
+    my ( $device_id, $mapping_error ) =
+        _device_id_for_register( $self, $register_id );
+
     return $c->render(
-        status => 404, format => 'json',
-        json   => { error => 'TERM', description => 'No Square device_id mapped for this register' }
+        status => 400, format => 'json',
+        json   => { error => 'REGISTER_MAPPING', description => $mapping_error }
     ) unless $device_id;
 
     my $idempotency_key = _uuid();
@@ -173,12 +228,12 @@ sub create_checkout {
             idempotency_key  => $idempotency_key,
             amount_cents     => 0 + $amount_cents,
             accountlines     => join(',', @ids),
+            register_id      => 0 + $register_id,
         }
     );
 }
 
 sub create_pos_checkout {
-    warn "Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::create_pos_checkout";
     my $c = shift->openapi->valid_input or return;
 
     my $amount_cents = $c->param('amount');
@@ -208,11 +263,12 @@ sub create_pos_checkout {
         json   => { error => 'CONFIG', description => 'SquareAccessToken not configured' }
     ) unless $token;
 
-    my $device_id = _device_id_for_register( $self, $register_id );
+    my ( $device_id, $mapping_error ) =
+        _device_id_for_register( $self, $register_id );
     return $c->render(
-        status => 404,
+        status => 400,
         format => 'json',
-        json   => { error => 'TERM', description => 'No Square device_id mapped for this register' }
+        json   => { error => 'REGISTER_MAPPING', description => $mapping_error }
     ) unless $device_id;
 
     my $idempotency_key = _uuid();
@@ -267,7 +323,6 @@ Poll status of a Square Terminal checkout
 =cut
 
 sub get_checkout {
-    warn "Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::get_checkout";
     my $c = shift->openapi->valid_input or return;
 
     my $checkout_id = $c->param('checkout_id') // '';
@@ -313,7 +368,6 @@ Dismiss a checkout on the terminal display (useful after cancel/fail/success)
 =cut
 
 sub dismiss_checkout {
-    warn "Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::dismiss_checkout";
     my $c = shift->openapi->valid_input or return;
 
     my $checkout_id = $c->param('checkout_id') // '';
@@ -359,11 +413,11 @@ Later: move this logic to webhook handler for server-side completion.
 =cut
 
 sub finalize_checkout {
-    warn "Koha::Plugin::Com::ByWaterSolutions::SquareTerminal::API::finalize_checkout";
     my $c = shift->openapi->valid_input or return;
 
     my $checkout_id     = $c->param('checkout_id') // '';
     my $accountline_ids = $c->param('accountlines') // '';
+    my $register_id     = $c->param('register_id');
     my @ids = grep { $_ =~ /^\d+$/ } split( /,/, $accountline_ids );
 
     return $c->render(
@@ -371,7 +425,15 @@ sub finalize_checkout {
         json   => { error => 'BAD_REQUEST', description => 'checkout_id and accountlines required' }
     ) unless $checkout_id && @ids;
 
-    my @accountlines = Koha::Account::Lines->search( { accountlines_id => \@ids } )->as_list;
+    my %seen_ids;
+    return $c->render(
+        status => 400,
+        format => 'json',
+        json   => {
+            error       => 'DUPLICATE_ACCOUNTLINES',
+            description => 'Duplicate accountline IDs are not allowed',
+        }
+    ) if grep { $seen_ids{$_}++ } @ids;
 
     my $self   = Koha::Plugin::Com::ByWaterSolutions::SquareTerminal->new({});
     my $token  = $self->retrieve_data('SquareAccessToken') // '';
@@ -406,11 +468,60 @@ sub finalize_checkout {
         json   => { error => 'NOT_COMPLETE', description => "Checkout status is $status", checkout => $checkout }
     ) unless $status eq 'COMPLETED';
 
+    my $userenv = C4::Context->userenv || {};
+    $register_id //= $userenv->{register_id};
+
+    my ( $device_id, $mapping_error ) =
+        _device_id_for_register( $self, $register_id );
+
+    return $c->render(
+        status => 400,
+        format => 'json',
+        json   => {
+            error       => 'REGISTER_MAPPING',
+            description => $mapping_error,
+        }
+    ) unless $device_id;
+
+    my $checkout_device_id =
+        $checkout->{device_options}
+        && $checkout->{device_options}->{device_id};
+
+    return $c->render(
+        status => 409,
+        format => 'json',
+        json   => {
+            error       => 'REGISTER_MISMATCH',
+            description => 'The selected register does not match the original Square checkout.',
+        }
+    ) unless defined $checkout_device_id
+        && $checkout_device_id eq $device_id;
+
+    my $checkout_accountlines = $checkout->{reference_id} // '';
+
+    return $c->render(
+        status => 409,
+        format => 'json',
+        json   => {
+            error       => 'ACCOUNTLINES_MISMATCH',
+            description => 'Selected accountlines do not match the original Square checkout',
+        }
+    ) unless $checkout_accountlines eq join( ',', @ids );
+
     my $payment_id = $checkout->{payment_ids} && ref($checkout->{payment_ids}) eq 'ARRAY'
         ? $checkout->{payment_ids}->[0]
         : undef;
 
-    my $note = $payment_id ? "Square payment_id: $payment_id" : "Square checkout_id: $checkout_id";
+    return $c->render(
+        status => 409,
+        format => 'json',
+        json   => {
+            error       => 'MISSING_PAYMENT_ID',
+            description => 'Completed Square checkout has no associated payment ID',
+        }
+    ) unless $payment_id;
+
+    my $note = "Square payment_id: $payment_id";
 
     # Idempotency guard: check if this Square payment has already been finalized
     my $existing_payment = Koha::Account::Lines->search(
@@ -490,9 +601,87 @@ return $c->render(
     && $square_amount_cents =~ /^\d+$/
     && $square_amount_cents > 0;
 
-my $amount = sprintf '%.2f', $square_amount_cents / 100;
+# Verify Square collected exactly the amount requested at checkout.
+my $checkout_amount_money = $checkout->{amount_money};
 
-my $userenv = C4::Context->userenv;
+return $c->render(
+    status => 409,
+    format => 'json',
+    json   => {
+        error       => 'CHECKOUT_AMOUNT_MISMATCH',
+        description => 'Original Square checkout amount is unavailable',
+    }
+) unless $checkout_amount_money
+    && ref($checkout_amount_money) eq 'HASH'
+    && defined $checkout_amount_money->{amount}
+    && $checkout_amount_money->{amount} =~ /^\d+$/;
+
+return $c->render(
+    status => 409,
+    format => 'json',
+    json   => {
+        error       => 'PAYMENT_AMOUNT_MISMATCH',
+        description => 'Square payment amount or currency does not match the original checkout',
+    }
+) unless $square_amount_cents == $checkout_amount_money->{amount}
+    && defined $payment->{amount_money}->{currency}
+    && defined $checkout_amount_money->{currency}
+    && $payment->{amount_money}->{currency} ne ''
+    && $checkout_amount_money->{currency} ne ''
+    && $payment->{amount_money}->{currency} eq
+       $checkout_amount_money->{currency};
+
+# Refresh accountlines immediately before applying the payment.
+my @accountlines =
+    Koha::Account::Lines->search( { accountlines_id => \@ids } )->as_list;
+
+return $c->render(
+    status => 409,
+    format => 'json',
+    json   => {
+        error       => 'ACCOUNTLINES_NOT_FOUND',
+        description => 'One or more selected accountlines no longer exist',
+    }
+) unless @accountlines == @ids;
+
+# All selected accountlines must belong to the same patron.
+my $patron_id = $accountlines[0]->borrowernumber;
+
+return $c->render(
+    status => 409,
+    format => 'json',
+    json   => {
+        error       => 'ACCOUNTLINES_PATRON_MISMATCH',
+        description => 'All selected accountlines must belong to the same patron',
+    }
+) if grep { $_->borrowernumber != $patron_id } @accountlines;
+
+# Every selected charge must still have an outstanding balance.
+return $c->render(
+    status => 409,
+    format => 'json',
+    json   => {
+        error       => 'ACCOUNTLINES_ALREADY_PAID',
+        description => 'One or more selected charges no longer have an outstanding balance',
+    }
+) if grep { $_->amountoutstanding <= 0 } @accountlines;
+
+my $outstanding_total = 0;
+$outstanding_total += $_->amountoutstanding for @accountlines;
+
+my $outstanding_cents =
+    int( sprintf( '%.0f', $outstanding_total * 100 ) );
+
+return $c->render(
+    status => 409,
+    format => 'json',
+    json   => {
+        error       => 'AMOUNT_EXCEEDS_BALANCE',
+        description => 'Square payment exceeds the refreshed outstanding balance',
+    }
+) if $square_amount_cents > $outstanding_cents;
+
+my $amount = sprintf '%.2f', $square_amount_cents / 100;
 
 return $c->render(
     status => 401,
@@ -505,8 +694,6 @@ return $c->render(
     && ref($userenv) eq 'HASH'
     && $userenv->{branch};
 
-my $patron_id = $accountlines[0]->borrowernumber;
-
 my $d = Koha::Account->new(
     { patron_id => $patron_id }
 )->pay(
@@ -516,7 +703,8 @@ my $d = Koha::Account->new(
         description  => 'Payment via Square Terminal',
         library_id   => $userenv->{branch},
         lines        => \@accountlines,
-        payment_type => 'CREDITCARD',
+        payment_type  => 'CREDITCARD',
+        cash_register => $register_id,
     }
 );
 
@@ -652,15 +840,6 @@ sub webhook {
     my $status      = $checkout->{status}       // '';
     my $reference   = $checkout->{reference_id} // '';
 
-    warn sprintf(
-        'Square Terminal webhook received: event_id=%s type=%s checkout_id=%s status=%s reference_id=%s',
-        $event_id,
-        $event_type,
-        $checkout_id,
-        $status,
-        $reference,
-    );
-
     if (
            $event_type eq 'terminal.checkout.created'
         || $event_type eq 'terminal.checkout.updated'
@@ -695,19 +874,56 @@ sub webhook {
 sub _device_id_for_register {
     my ( $plugin, $register_id ) = @_;
 
+    my $userenv = C4::Context->userenv || {};
+    $register_id //= $userenv->{register_id};
+
+    return ( undef, 'No Koha cash register is selected' )
+        unless defined $register_id && $register_id =~ /^\d+$/;
+
+    my $branch = $userenv->{branch};
+
+    return ( undef, 'No staff library is selected' )
+        unless $branch;
+
+    my $register = Koha::Cash::Registers->find($register_id);
+
+    return ( undef, 'The selected Koha cash register does not exist' )
+        unless $register;
+
+    return ( undef, 'The selected Koha cash register is archived' )
+        if $register->archived;
+
+    return ( undef, 'The selected Koha cash register belongs to another library' )
+        unless $register->branch eq $branch;
+
     my $yaml = $plugin->retrieve_data('RegisterMapping') // '';
-    my $mapping = {};
-    try {
-        $mapping = $yaml ? Load($yaml) : {};
+
+    return ( undef, 'No Square Terminal register mappings have been configured' )
+        unless $yaml =~ /\S/;
+
+    my $mapping;
+    my $parsed = try {
+        $mapping = Load($yaml);
+        1;
     } catch {
-        warn "RegisterMapping YAML parse error: $_";
-        $mapping = {};
+        warn "Square Terminal register mapping YAML error: $_";
+        0;
     };
 
-    $register_id //= C4::Context->userenv->{register_id};
-    return unless $register_id;
+    return ( undef, 'Register mapping contains invalid YAML' )
+        unless $parsed;
 
-    return $mapping->{$register_id};
+    return ( undef, 'Register mapping must contain register IDs and device IDs' )
+        unless ref($mapping) eq 'HASH';
+
+    my $device_id = $mapping->{$register_id};
+
+    return (
+        undef,
+        "Koha register $register_id has no assigned Square Terminal"
+    ) unless defined $device_id && !ref($device_id) && $device_id =~ /\S/;
+
+    return ( $device_id, undef );
 }
 
 sub _square_request {
@@ -830,13 +1046,6 @@ sub _handle_terminal_checkout_event {
     return unless $checkout_id;
 
     if ( $status eq 'COMPLETED' ) {
-        warn sprintf(
-            'Square Terminal checkout completed: event_id=%s checkout_id=%s reference_id=%s',
-            $event_id,
-            $checkout_id,
-            $reference,
-        );
-
         # Do not create the Koha payment here yet.
         #
         # The current browser flow calls finalize_checkout after polling
@@ -844,11 +1053,6 @@ sub _handle_terminal_checkout_event {
         # recording the same Square payment twice.
     }
     elsif ( $status eq 'CANCELED' || $status eq 'CANCELLED' ) {
-        warn sprintf(
-            'Square Terminal checkout canceled: event_id=%s checkout_id=%s',
-            $event_id,
-            $checkout_id,
-        );
     }
     elsif ( $status eq 'FAILED' ) {
         warn sprintf(

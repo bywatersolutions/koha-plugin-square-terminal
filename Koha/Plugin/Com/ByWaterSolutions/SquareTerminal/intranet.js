@@ -84,7 +84,7 @@ $(document).ready(function() {
         : null;
 }
 
-    function launchSquarePayment(accountlineIds, defaultAmount) {
+    function launchSquarePayment(accountlineIds, defaultAmount, registerId) {
         if (!accountlineIds || !accountlineIds.length) {
             alert("No charges selected.");
             return;
@@ -104,7 +104,11 @@ $(document).ready(function() {
                 return;
             }
 
-            const createUrl = `/api/v1/contrib/square_terminal/checkout/${accountlines}?amount=${encodeURIComponent(amountCents)}`;
+            const registerParam = registerId
+                ? `&register_id=${encodeURIComponent(registerId)}`
+                : '';
+
+            const createUrl = `/api/v1/contrib/square_terminal/checkout/${accountlines}?amount=${encodeURIComponent(amountCents)}${registerParam}`;
 
             $.ajax({
                 url: createUrl,
@@ -164,7 +168,12 @@ $(document).ready(function() {
                             if (status === 'COMPLETED') {
                                 clearInterval(pollTimer);
 
-                                const finalizeUrl = `/api/v1/contrib/square_terminal/checkout/finalize/${encodeURIComponent(checkoutId)}/${accountlines}`;
+                                const checkoutRegisterId = resp.register_id || registerId;
+                                const registerParam = checkoutRegisterId
+                                    ? `?register_id=${encodeURIComponent(checkoutRegisterId)}`
+                                    : '';
+
+                                const finalizeUrl = `/api/v1/contrib/square_terminal/checkout/finalize/${encodeURIComponent(checkoutId)}/${accountlines}${registerParam}`;
 
                                 $.ajax({
                                     url: finalizeUrl,
@@ -305,76 +314,171 @@ function launchSquarePosPayment(defaultAmount, registerId) {
 
                 const statusUrl = `/api/v1/contrib/square_terminal/checkout/status/${encodeURIComponent(checkoutId)}`;
                 let pollCount = 0;
+                let paymentSubmitted = false;
+                let checkoutCanceled = false;
+                let pollingStopped = false;
+                let pollTimer;
 
-                let pollTimer = setInterval(function() {
+                const dismissCheckout = function() {
+                    const dismissUrl =
+                        `/api/v1/contrib/square_terminal/checkout/dismiss/${encodeURIComponent(checkoutId)}`;
+
+                    $.ajax({
+                        url: dismissUrl,
+                        method: 'POST'
+                    });
+                };
+
+                const closeSquareModal = function() {
+                    bootstrap.Modal.getOrCreateInstance(
+                        document.getElementById('squareModal')
+                    ).hide();
+                };
+
+                pollTimer = setInterval(function() {
                     pollCount++;
 
-                    $.getJSON(statusUrl, function(statusResp) {
-                        const checkout = statusResp.checkout || {};
-                        const status = checkout.status || statusResp.status || '';
+                    if (pollCount >= 60) {
+                        clearInterval(pollTimer);
+                        pollingStopped = true;
 
-                        let friendlyStatus = status || 'UNKNOWN';
-                        if (status === 'PENDING') {
-                            friendlyStatus = 'Square payment is processing... Waiting for customer on terminal.';
-                        } else if (status === 'IN_PROGRESS') {
-                            friendlyStatus = 'Square payment is processing... Customer is interacting with terminal.';
-                        } else if (status === 'COMPLETED') {
-                            friendlyStatus = 'Payment complete!';
+                        if (!paymentSubmitted && !checkoutCanceled) {
+                            closeSquareModal();
+                            dismissCheckout();
+
+                            alert(
+                                "Square checkout timed out. " +
+                                "Please verify the terminal before retrying."
+                            );
                         }
 
-                        $('#squareStatusText').text(friendlyStatus);
+                        return;
+                    }
 
-                        if (status === 'CANCELED' || status === 'CANCELLED' || status === 'FAILED') {
-                            clearInterval(pollTimer);
-                            bootstrap.Modal.getOrCreateInstance(document.getElementById('squareModal')).hide();
+                    $.getJSON(statusUrl)
+                        .done(function(statusResp) {
+                            if (paymentSubmitted || checkoutCanceled || pollingStopped) {
+                                return;
+                            }
 
-                            const dismissUrl = `/api/v1/contrib/square_terminal/checkout/dismiss/${encodeURIComponent(checkoutId)}`;
-                            $.ajax({ url: dismissUrl, method: 'POST' });
+                            const checkout = statusResp.checkout || {};
+                            const status = checkout.status || statusResp.status || '';
 
-                            alert("Transaction canceled or failed.");
-                            return;
-                        }
+                            let friendlyStatus = status || 'UNKNOWN';
 
-                        if (status === 'COMPLETED') {
-                            clearInterval(pollTimer);
+                            if (status === 'PENDING') {
+                                friendlyStatus =
+                                    'Square payment is processing... Waiting for customer on terminal.';
+                            } else if (status === 'IN_PROGRESS') {
+                                friendlyStatus =
+                                    'Square payment is processing... Customer is interacting with terminal.';
+                            } else if (status === 'COMPLETED') {
+                                friendlyStatus = 'Payment complete!';
+                            }
 
-                            const dismissUrl = `/api/v1/contrib/square_terminal/checkout/dismiss/${encodeURIComponent(checkoutId)}`;
-                            $.ajax({ url: dismissUrl, method: 'POST' });
+                            $('#squareStatusText').text(friendlyStatus);
 
-                            bootstrap.Modal.getOrCreateInstance(document.getElementById('squareModal')).hide();
+                            if (
+                                status === 'CANCELED' ||
+                                status === 'CANCELLED' ||
+                                status === 'FAILED'
+                            ) {
+                                clearInterval(pollTimer);
+                                closeSquareModal();
+                                dismissCheckout();
 
-                            // Make Koha treat the POS payment as a credit card payment
-                            $('#payment_type').val('CREDITCARD');
+                                alert("Transaction canceled or failed.");
+                                return;
+                            }
 
-                            // Submit the normal POS form so Koha builds hidden sales[] inputs
-                            // and runs the normal purchase flow.
-                            $('#payForm').trigger('submit');
-                            return;
-                        }
+                            if (status === 'COMPLETED') {
+                                clearInterval(pollTimer);
 
-                        if (pollCount >= 60) {
-                            clearInterval(pollTimer);
-                            bootstrap.Modal.getOrCreateInstance(document.getElementById('squareModal')).hide();
+                                // Verify the completed checkout amount.
+                                const checkoutAmount =
+                                    checkout.amount_money &&
+                                    checkout.amount_money.amount;
 
-                            alert(`Square checkout timed out. Last status: ${status || 'UNKNOWN'}`);
+                                if (
+                                    !Number.isSafeInteger(Number(checkoutAmount)) ||
+                                    Number(checkoutAmount) !== Number(amountCents)
+                                ) {
+                                    closeSquareModal();
+                                    dismissCheckout();
 
-                            const dismissUrl = `/api/v1/contrib/square_terminal/checkout/dismiss/${encodeURIComponent(checkoutId)}`;
-                            $.ajax({ url: dismissUrl, method: 'POST' });
+                                    alert(
+                                        "Square payment amount does not match " +
+                                        "the requested POS amount. " +
+                                        "Please verify the transaction before continuing."
+                                    );
+                                    return;
+                                }
 
-                            return;
-                        }
-                    });
+                                // Ensure the POS form is available.
+                                const $payForm = $('#payForm');
+
+                                if (!$payForm.length) {
+                                    closeSquareModal();
+                                    dismissCheckout();
+
+                                    alert(
+                                        "Unable to locate the Koha POS payment form. " +
+                                        "Please verify the transaction."
+                                    );
+                                    return;
+                                }
+
+                                // Prevent duplicate submissions.
+                                if (paymentSubmitted) {
+                                    return;
+                                }
+
+                                paymentSubmitted = true;
+
+                                dismissCheckout();
+                                closeSquareModal();
+
+                                // Make Koha treat the POS payment as a credit card payment.
+                                $('#payment_type').val('CREDITCARD');
+
+                                // Preserve Koha's normal POS workflow.
+                                $payForm.trigger('submit');
+                                return;
+                            }
+                        })
+                        .fail(function(xhr) {
+                            if (paymentSubmitted || checkoutCanceled || pollingStopped) {
+                                return;
+                            }
+
+                            console.error(
+                                "Square checkout status request failed:",
+                                xhr
+                            );
+
+                            $('#squareStatusText').text(
+                                'Unable to check Square payment status. Retrying...'
+                            );
+                        });
+
                 }, 1000);
 
                 $('#square-cancel').off('click').on('click', function() {
+                    if (paymentSubmitted || checkoutCanceled || pollingStopped) {
+                        return;
+                    }
+
+                    checkoutCanceled = true;
                     clearInterval(pollTimer);
 
-                    const dismissUrl = `/api/v1/contrib/square_terminal/checkout/dismiss/${encodeURIComponent(checkoutId)}`;
+                    const dismissUrl =
+                        `/api/v1/contrib/square_terminal/checkout/dismiss/${encodeURIComponent(checkoutId)}`;
+
                     $.ajax({
                         url: dismissUrl,
                         method: 'POST',
                         complete: function() {
-                            bootstrap.Modal.getOrCreateInstance(document.getElementById('squareModal')).hide();
+                            closeSquareModal();
                         }
                     });
                 });
@@ -428,7 +532,7 @@ function launchSquarePosPayment(defaultAmount, registerId) {
 
         $('#pay-selected-via-square').on('click', function(e) {
             e.preventDefault();
-            launchSquarePayment(selectedAccountlineIds(), null);
+            launchSquarePayment(selectedAccountlineIds(), null, $('#cash_register').val());
         });
     }
 
@@ -449,7 +553,14 @@ function launchSquarePosPayment(defaultAmount, registerId) {
                 return;
             }
 
-            launchSquarePayment([accountlineId], paid);
+            const registerId = $('#cash_register').val();
+
+            if ($('#cash_register').length && !registerId) {
+                alert("Please select a cash register.");
+                return;
+            }
+
+            launchSquarePayment([accountlineId], paid, registerId);
         });
     }
 

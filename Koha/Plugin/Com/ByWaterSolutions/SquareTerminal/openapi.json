@@ -44,6 +44,13 @@
           "description": "Optional integer amount in cents. If omitted, server computes from outstanding balances.",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "register_id",
+          "in": "query",
+          "description": "Optional Koha cash register ID. Defaults to the logged-in register.",
+          "required": false,
+          "type": "integer"
         }
       ],
       "produces": ["application/json"],
@@ -168,6 +175,13 @@
           "description": "List of comma separated accountline ids to pay (server will pay outstanding on these lines)",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "register_id",
+          "in": "query",
+          "description": "Koha cash register used for the original Square checkout.",
+          "required": false,
+          "type": "integer"
         }
       ],
       "produces": ["application/json"],
