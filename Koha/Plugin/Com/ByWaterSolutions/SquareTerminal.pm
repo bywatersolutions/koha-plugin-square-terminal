@@ -16,15 +16,15 @@ use Mojo::JSON qw(decode_json);
 use Encode;
 
 ## Here we set our plugin version
-our $VERSION         = "1.0";
-our $MINIMUM_VERSION = "25.05";
+our $VERSION         = "1.0.1";
+our $MINIMUM_VERSION = "25.11";
 
 ## Here is our metadata, some keys are required, some are optional
 our $metadata = {
     name            => 'Square Terminal Plugin',
     author          => 'Laura Escamilla',
     date_authored   => '2026-03-02',
-    date_updated    => "2026-07-10",
+    date_updated    => "2026-11-04",
     minimum_version => $MINIMUM_VERSION,
     maximum_version => undef,
     version         => $VERSION,
