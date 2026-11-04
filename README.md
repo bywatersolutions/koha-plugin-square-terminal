@@ -1,5 +1,3 @@
-WORK IN PROGRESS -- NOT READY TO BE USED
-
 # Square Terminal Plugin for Koha
 
 [![CI](https://github.com/bywatersolutions/koha-plugin-square-terminal/actions/workflows/main.yml/badge.svg)](https://github.com/bywatersolutions/koha-plugin-square-terminal/actions/workflows/main.yml)
